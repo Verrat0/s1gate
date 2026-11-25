@@ -1,0 +1,618 @@
+import bundledDomains from "../../data/domains.json";
+import bundledSnapshot from "../../data/snapshot.json";
+import type {
+  BenchmarkSnapshot,
+  BudgetProfile,
+  ClassifierAdapter,
+  DomainDefinition,
+  ExecutionRole,
+  S1GateConfig,
+  S1GateDecision,
+  S1GateRequest,
+  SessionPin,
+  StuckLoopReport,
+  SystemOneSignals,
+} from "../types.js";
+import { buildCandidatePool } from "./catalog.js";
+import { buildRoutingEnvelope } from "./envelope.js";
+import { inspectFastPath, pickAuxiliaryModel } from "./fast-path.js";
+import { scoreAndSelectModel, type ScoringInput } from "./scorer.js";
+import { resolveSessionKey, SessionPinStore, shouldAllowMidSessionSwitch } from "./session.js";
+import { inspectStuckLoop, isRatchetLocked } from "./stuck-loop.js";
+import {
+  BUILTIN_BACKEND_CALIBRATIONS,
+  HeuristicFallbackClassifier,
+  SystemOneClient,
+} from "./systemone-client.js";
+
+export interface S1GateStats {
+  totalRequests: number;
+  pinReuses: number;
+  classifierCalls: number;
+  auxiliaryBypasses: number;
+  compactions: number;
+  escalations: number;
+  passthroughs: number;
+  fallbacks: number;
+  activePins: number;
+}
+
+export interface S1GateEngine {
+  route(req: S1GateRequest): Promise<S1GateDecision>;
+  getStats(): S1GateStats;
+  clearSessions(): void;
+  readonly snapshot: BenchmarkSnapshot;
+  readonly domains: readonly DomainDefinition[];
+}
+
+const ESCALATION_QUALITY_TOLERANCE = 0.03;
+
+function sanitizeHeaderValue(val: string): string {
+  return val.replace(/[^\x20-\x7e]/g, "").slice(0, 256);
+}
+
+export function buildResponseHeaders(decision: Omit<S1GateDecision, "headers">): Record<string, string> {
+  const raw: Record<string, string> = {
+    "X-Router-Engine": "s1gate",
+    "X-Router-Model": decision.selectedModel,
+    "X-Router-Action": decision.action,
+    "X-Router-Role": decision.role,
+    "X-Router-Profile": decision.profile,
+    "X-Router-Cache-Pinned": String(decision.cachePinned),
+    "X-Router-Latency-Ms": String(Math.round(decision.latencyMs.total * 100) / 100),
+    "X-Router-Benchmark-Source": "llm-stats.com",
+  };
+  if (decision.signals?.domain) {
+    raw["X-Router-Domain"] = decision.signals.domain;
+    raw["X-Router-Complexity"] = decision.signals.complexity.toFixed(2);
+  }
+  if (decision.scoring) {
+    raw["X-Router-Estimated-Savings-Pct"] = decision.scoring.estimatedSavingsPct.toFixed(1);
+  }
+  if (decision.fallbackReason) {
+    raw["X-Router-Fallback-Reason"] = decision.fallbackReason;
+  }
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    headers[k] = sanitizeHeaderValue(v);
+  }
+  return headers;
+}
+
+function finalizeDecision(base: Omit<S1GateDecision, "headers">): S1GateDecision {
+  return {
+    ...base,
+    headers: buildResponseHeaders(base),
+  };
+}
+
+function resolveDomains(custom?: DomainDefinition[]): DomainDefinition[] {
+  const defaults = bundledDomains as DomainDefinition[];
+  if (!custom || custom.length === 0) return defaults;
+  const map = new Map<string, DomainDefinition>(defaults.map(d => [d.id, d]));
+  for (const d of custom) map.set(d.id, d);
+  return [...map.values()];
+}
+
+function resolveNoulRole(
+  noul: number,
+  profile: BudgetProfile,
+  threshold: number,
+): ExecutionRole {
+  if (noul >= threshold) return "orchestrator";
+  if (noul <= 1 - threshold) return "specialist";
+  // Uncertainty band (0.35..0.65): fail upward on quality, stay economical + ratchet on balanced/frugal
+  return profile === "quality" ? "orchestrator" : "specialist";
+}
+
+function shouldSoftEscalate(
+  shouldEscalateProb: number | undefined,
+  loopReport: StuckLoopReport,
+  threshold: number,
+): boolean {
+  if (typeof shouldEscalateProb !== "number" || !Number.isFinite(shouldEscalateProb)) {
+    return loopReport.reasons.length >= 2;
+  }
+  if (shouldEscalateProb >= threshold) return true;
+  if (shouldEscalateProb >= 0.5 && loopReport.reasons.length >= 2) return true;
+  return false;
+}
+
+function selectEscalationModel(
+  input: ScoringInput,
+  currentPinModel: string,
+): ReturnType<typeof scoreAndSelectModel> {
+  const fullScoring = scoreAndSelectModel(input);
+  const bestOverall = fullScoring.selected;
+  if (bestOverall.proxyId !== currentPinModel) {
+    return fullScoring;
+  }
+
+  const currentPinQuality = bestOverall.qualityScore;
+  const minPeerQuality = currentPinQuality - ESCALATION_QUALITY_TOLERANCE;
+  const hasComparableAlternative = fullScoring.rankedCandidates.some(
+    c => c.proxyId !== currentPinModel && c.qualityScore >= minPeerQuality,
+  );
+  if (!hasComparableAlternative) {
+    return fullScoring;
+  }
+
+  const alternativePool = input.candidates.filter(c => c.proxyId !== currentPinModel);
+  if (alternativePool.length === 0) {
+    return fullScoring;
+  }
+
+  const altScoring = scoreAndSelectModel({
+    ...input,
+    candidates: alternativePool,
+  });
+  return altScoring.selected.qualityScore >= minPeerQuality ? altScoring : fullScoring;
+}
+
+export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
+  const snapshot: BenchmarkSnapshot = config.snapshot ?? (bundledSnapshot as unknown as BenchmarkSnapshot);
+  const domains = resolveDomains(config.domains);
+  const defaultProfile: BudgetProfile = config.defaultProfile ?? "balanced";
+  const privacyMode = config.privacyMode ?? "standard";
+  const classifierTimeoutMs = config.classifierTimeoutMs ?? 1500;
+  const enableRatchet = config.enableEscalationRatchet ?? true;
+
+  const sessionStore = new SessionPinStore({
+    ttlMs: config.sessionTtlMs,
+    maxSessions: config.maxSessions,
+  });
+
+  const fallbackClassifier = new HeuristicFallbackClassifier();
+  const classifier: ClassifierAdapter =
+    privacyMode === "local_only"
+      ? fallbackClassifier
+      : config.classifier
+        ? config.classifier
+        : config.systemOne
+          ? new SystemOneClient(config.systemOne)
+          : fallbackClassifier;
+
+  const sysModel = config.systemOne?.model ?? "";
+  const lowerSysModel = sysModel.toLowerCase();
+  const builtinCalibration =
+    BUILTIN_BACKEND_CALIBRATIONS[sysModel] ??
+    Object.entries(BUILTIN_BACKEND_CALIBRATIONS).find(
+      ([key]) =>
+        lowerSysModel === key.toLowerCase() || lowerSysModel.endsWith(`/${key.toLowerCase()}`),
+    )?.[1];
+  const noulOrchThreshold =
+    config.systemOne?.calibration?.noulOrchestratorThreshold ??
+    builtinCalibration?.noulOrchestratorThreshold ??
+    0.65;
+  const noulEscThreshold =
+    config.systemOne?.calibration?.noulEscalateThreshold ??
+    builtinCalibration?.noulEscalateThreshold ??
+    0.70;
+
+  const stats: Omit<S1GateStats, "activePins"> = {
+    totalRequests: 0,
+    pinReuses: 0,
+    classifierCalls: 0,
+    auxiliaryBypasses: 0,
+    compactions: 0,
+    escalations: 0,
+    passthroughs: 0,
+    fallbacks: 0,
+  };
+
+  async function route(req: S1GateRequest): Promise<S1GateDecision> {
+    const tStart = performance.now();
+    stats.totalRequests += 1;
+    const nowMs = req.nowMs ?? Date.now();
+    const harness = req.harness ?? "generic";
+    const availableModels = req.availableModels.filter(m => typeof m === "string" && m.trim().length > 0);
+
+    const rawBodyModel = typeof req.body?.model === "string" ? req.body.model : "";
+    const safeDefaultModel = availableModels[0] ?? rawBodyModel;
+
+    // ---------- STAGE 1a: Local Fast-Path (0ms) ----------
+    const tFastStart = performance.now();
+    const verdict = inspectFastPath(req, {
+      triggerModels: config.triggerModels,
+      defaultProfile,
+    });
+    const profile: BudgetProfile = req.profile ?? verdict.profileOverride ?? defaultProfile;
+    const isSubagent = verdict.isSubagentHeader || verdict.role === "subagent";
+    const sessionKey = resolveSessionKey(req, isSubagent);
+
+    // 1. Passthrough (opt-out or count_tokens)
+    if (verdict.kind === "passthrough") {
+      stats.passthroughs += 1;
+      const fastMs = performance.now() - tFastStart;
+      return finalizeDecision({
+        selectedModel: rawBodyModel || safeDefaultModel,
+        rankedFallbacks: availableModels.filter(m => m !== rawBodyModel),
+        action: "passthrough",
+        role: verdict.role,
+        profile,
+        sessionKey: null,
+        cachePinned: false,
+        latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
+      });
+    }
+
+    // 2. Compaction boundary -> unlock pin & route compaction request to fast/long-context summarizer
+    if (verdict.kind === "compact") {
+      stats.compactions += 1;
+      sessionStore.delete(sessionKey);
+      const compactModel = pickAuxiliaryModel(availableModels, config.auxiliaryModelHints);
+      const fastMs = performance.now() - tFastStart;
+      return finalizeDecision({
+        selectedModel: compactModel || safeDefaultModel,
+        rankedFallbacks: availableModels.filter(m => m !== compactModel),
+        action: "compact",
+        role: "auxiliary",
+        profile,
+        sessionKey,
+        cachePinned: false,
+        latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
+      });
+    }
+
+    // 3. Auxiliary call -> 0ms bypass without calling System-1 or disturbing parent session pin
+    if (verdict.kind === "auxiliary") {
+      stats.auxiliaryBypasses += 1;
+      const auxModel = pickAuxiliaryModel(availableModels, config.auxiliaryModelHints);
+      const fastMs = performance.now() - tFastStart;
+      return finalizeDecision({
+        selectedModel: auxModel || safeDefaultModel,
+        rankedFallbacks: availableModels.filter(m => m !== auxModel),
+        action: "auxiliary",
+        role: "auxiliary",
+        profile,
+        sessionKey: null,
+        cachePinned: false,
+        latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
+      });
+    }
+
+    // Empty model pool failsafe
+    if (availableModels.length === 0) {
+      stats.fallbacks += 1;
+      const fastMs = performance.now() - tFastStart;
+      return finalizeDecision({
+        selectedModel: rawBodyModel,
+        rankedFallbacks: [],
+        action: "passthrough",
+        role: verdict.role,
+        profile,
+        sessionKey,
+        cachePinned: false,
+        fallbackReason: "empty_available_models",
+        latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
+      });
+    }
+
+    const candidates = buildCandidatePool(availableModels, snapshot, config.modelOverrides);
+    if (candidates.length === 0) {
+      stats.fallbacks += 1;
+      const fastMs = performance.now() - tFastStart;
+      return finalizeDecision({
+        selectedModel: rawBodyModel || safeDefaultModel,
+        rankedFallbacks: [],
+        action: "passthrough",
+        role: verdict.role,
+        profile,
+        sessionKey,
+        cachePinned: false,
+        fallbackReason: "no_eligible_chat_models",
+        latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
+      });
+    }
+
+    const explicitProfileOverride = req.profile ?? verdict.profileOverride;
+    const effectiveRoleOverride = req.roleOverride ?? verdict.roleOverride;
+
+    const rawExistingPin = sessionStore.get(sessionKey, nowMs);
+    const pinCandidate = rawExistingPin
+      ? candidates.find(c => c.proxyId === rawExistingPin.model)
+      : undefined;
+    const pinInvalidated =
+      rawExistingPin !== undefined &&
+      (!pinCandidate ||
+        (verdict.requiresMultimodal && !pinCandidate.multimodal) ||
+        (verdict.hasTools && !pinCandidate.supportsTools) ||
+        pinCandidate.contextWindow < verdict.estimatedInputTokens ||
+        pinCandidate.harnessCompat[harness] === "unsupported" ||
+        (explicitProfileOverride !== undefined && explicitProfileOverride !== rawExistingPin.profile) ||
+        (effectiveRoleOverride !== undefined && effectiveRoleOverride !== rawExistingPin.role));
+
+    if (rawExistingPin && pinInvalidated) {
+      sessionStore.delete(sessionKey);
+    }
+
+    const existingPin = pinInvalidated ? undefined : rawExistingPin;
+    const pinModelStillAvailable = existingPin !== undefined && pinCandidate !== undefined;
+
+    let isCompactionBoundary = false;
+    let stuckLoop: StuckLoopReport | undefined;
+
+    // 4. Sticky Session Pin Check + Stuck-Loop Ratchet
+    if (existingPin && pinModelStillAvailable) {
+      if (sessionStore.didCompact(existingPin, verdict.estimatedInputTokens)) {
+        isCompactionBoundary = true;
+        stats.compactions += 1;
+        sessionStore.delete(sessionKey);
+      } else {
+        stuckLoop = enableRatchet ? inspectStuckLoop(req.body, req.protocol) : undefined;
+        const locked = isRatchetLocked(existingPin);
+
+        // Reuse sticky pin immediately (0ms!) when healthy or locked by ratchet hysteresis
+        if (!stuckLoop || stuckLoop.level === "none" || locked) {
+          stats.pinReuses += 1;
+          const updatedPin: SessionPin = {
+            ...existingPin,
+            turnCount: existingPin.turnCount + 1,
+            lastEstimatedTokens: verdict.estimatedInputTokens,
+            lastUsedAtMs: nowMs,
+          };
+          sessionStore.set(updatedPin);
+          const fastMs = performance.now() - tFastStart;
+          return finalizeDecision({
+            selectedModel: existingPin.model,
+            rankedFallbacks: availableModels.filter(m => m !== existingPin.model),
+            action: "pin_reuse",
+            role: existingPin.role,
+            profile: existingPin.profile,
+            sessionKey,
+            cachePinned: true,
+            ...(stuckLoop ? { stuckLoop } : {}),
+            latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
+          });
+        }
+
+        // Hard 0ms deterministic escalation (skip System-1!)
+        if (stuckLoop.level === "hard") {
+          const fastMs = performance.now() - tFastStart;
+          const tScoreStart = performance.now();
+          const escSignals: SystemOneSignals = {
+            domain: existingPin.domain,
+            domainProbabilities: { [existingPin.domain]: 1 },
+            domainConfidence: 1,
+            complexity: Math.max(0.85, existingPin.complexity),
+            needsFlagshipOrchestrator: 1,
+            shouldEscalate: 1,
+            backend: "deterministic-ratchet",
+            latencyMs: 0,
+            fromFallback: false,
+          };
+          const scoring = selectEscalationModel(
+            {
+              candidates,
+              snapshot,
+              domains,
+              signals: escSignals,
+              profile: "quality",
+              role: "orchestrator",
+              hasTools: verdict.hasTools,
+              requiresMultimodal: verdict.requiresMultimodal,
+              requiredContextTokens: Math.max(32_000, verdict.estimatedInputTokens),
+              harness,
+              quotaUtilization: req.quotaUtilization,
+            },
+            existingPin.model,
+          );
+          const scoreMs = performance.now() - tScoreStart;
+          const nextModel = scoring.selected.proxyId;
+          stats.escalations += 1;
+
+          sessionStore.set({
+            ...existingPin,
+            model: nextModel,
+            role: "orchestrator",
+            profile: "quality",
+            complexity: escSignals.complexity,
+            turnCount: existingPin.turnCount + 1,
+            escalatedAtTurn: existingPin.turnCount + 1,
+            escalationCount: existingPin.escalationCount + 1,
+            lastEstimatedTokens: verdict.estimatedInputTokens,
+            lastUsedAtMs: nowMs,
+          });
+
+          return finalizeDecision({
+            selectedModel: nextModel,
+            rankedFallbacks: scoring.rankedCandidates.filter(c => c.proxyId !== nextModel).map(c => c.proxyId),
+            action: "escalate",
+            role: "orchestrator",
+            profile: "quality",
+            sessionKey,
+            cachePinned: true,
+            stuckLoop,
+            scoring: {
+              qualityScore: scoring.selected.qualityScore,
+              qMax: scoring.qMax,
+              qualityFloor: scoring.qualityFloor,
+              effectiveCost: scoring.selected.effectiveCost,
+              benchmarkRefs: scoring.selected.benchmarkRefs,
+              baselineModel: scoring.baselineModel,
+              estimatedSavingsPct: scoring.estimatedSavingsPct,
+            },
+            latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: scoreMs },
+          });
+        }
+      }
+    }
+
+    const fastMs = performance.now() - tFastStart;
+
+    // ---------- STAGE 1b: System-1 Cognitive Gate ----------
+    const isSoftStuckCheck = Boolean(existingPin && pinModelStillAvailable && !isCompactionBoundary && stuckLoop?.level === "soft");
+    const envelope = buildRoutingEnvelope(req, {
+      role: verdict.role,
+      stuckLoop,
+    });
+
+    const tClfStart = performance.now();
+    stats.classifierCalls += 1;
+    let signals: SystemOneSignals;
+    try {
+      signals = await classifier.classify({
+        envelope,
+        domains,
+        askOrchestrator: !isSubagent && verdict.canSpawnSubagent && !effectiveRoleOverride && !isSoftStuckCheck,
+        askEscalate: isSoftStuckCheck,
+        timeoutMs: classifierTimeoutMs,
+      });
+    } catch {
+      signals = await fallbackClassifier.classify({
+        envelope,
+        domains,
+        askOrchestrator: !isSubagent && verdict.canSpawnSubagent && !effectiveRoleOverride && !isSoftStuckCheck,
+        askEscalate: isSoftStuckCheck,
+        timeoutMs: classifierTimeoutMs,
+      });
+      signals = { ...signals, fromFallback: true, fallbackReason: "classifier_exception" };
+    }
+    if (signals.fromFallback) stats.fallbacks += 1;
+    const clfMs = performance.now() - tClfStart;
+
+    // Soft stuck check decided NOT to escalate -> keep sticky pin!
+    if (isSoftStuckCheck && existingPin && stuckLoop && !shouldSoftEscalate(signals.shouldEscalate, stuckLoop, noulEscThreshold)) {
+      stats.pinReuses += 1;
+      sessionStore.set({
+        ...existingPin,
+        turnCount: existingPin.turnCount + 1,
+        lastEstimatedTokens: verdict.estimatedInputTokens,
+        lastUsedAtMs: nowMs,
+      });
+      return finalizeDecision({
+        selectedModel: existingPin.model,
+        rankedFallbacks: availableModels.filter(m => m !== existingPin.model),
+        action: "pin_reuse",
+        role: existingPin.role,
+        profile: existingPin.profile,
+        sessionKey,
+        cachePinned: true,
+        signals,
+        stuckLoop,
+        ...(signals.fallbackReason ? { fallbackReason: signals.fallbackReason } : {}),
+        latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: clfMs, scoring: 0 },
+      });
+    }
+
+    // ---------- STAGE 2: Deterministic Scoring & Selection (<0.1ms) ----------
+    const tScoreStart = performance.now();
+    const isEscalating = isSoftStuckCheck;
+    const resolvedRole: ExecutionRole = isEscalating
+      ? "orchestrator"
+      : effectiveRoleOverride
+        ? effectiveRoleOverride
+        : isSubagent
+          ? "subagent"
+          : verdict.canSpawnSubagent
+            ? resolveNoulRole(signals.needsFlagshipOrchestrator, profile, noulOrchThreshold)
+            : "specialist";
+
+    const effectiveProfile: BudgetProfile = isEscalating ? "quality" : profile;
+    const baseScoringInput: ScoringInput = {
+      candidates,
+      snapshot,
+      domains,
+      signals,
+      profile: effectiveProfile,
+      role: resolvedRole,
+      hasTools: verdict.hasTools,
+      requiresMultimodal: verdict.requiresMultimodal,
+      requiredContextTokens: Math.max(32_000, verdict.estimatedInputTokens),
+      harness,
+      quotaUtilization: req.quotaUtilization,
+      ...(existingPin && pinModelStillAvailable && !isCompactionBoundary && !isEscalating
+        ? { switchingFromModel: existingPin.model, currentContextTokens: verdict.estimatedInputTokens }
+        : {}),
+    };
+
+    const scoring =
+      isEscalating && existingPin
+        ? selectEscalationModel(baseScoringInput, existingPin.model)
+        : scoreAndSelectModel(baseScoringInput);
+
+    let selectedModel = scoring.selected.proxyId;
+    let action: S1GateDecision["action"] = isEscalating ? "escalate" : "route";
+    let finalRole = resolvedRole;
+    let finalProfile = effectiveProfile;
+
+    // Cache Break-Even & Thinking-Signature Guard on non-hard mid-session switches
+    if (existingPin && pinModelStillAvailable && selectedModel !== existingPin.model) {
+      const curCandidate = pinCandidate;
+      const nextCandidate = candidates.find(c => c.proxyId === selectedModel);
+      if (curCandidate && nextCandidate) {
+        const switchCheck = shouldAllowMidSessionSwitch({
+          currentModel: curCandidate,
+          nextModel: nextCandidate,
+          currentContextTokens: verdict.estimatedInputTokens,
+          hasThinkingSignature: verdict.hasThinkingSignature,
+          isCompactionBoundary,
+          isHardEscalation: false,
+        });
+        if (!switchCheck.allow) {
+          selectedModel = existingPin.model;
+          action = "pin_reuse";
+          finalRole = existingPin.role;
+          finalProfile = existingPin.profile;
+          stats.pinReuses += 1;
+        }
+      }
+    }
+
+    if (action === "escalate") stats.escalations += 1;
+    const scoreMs = performance.now() - tScoreStart;
+
+    // Persist sticky pin for main sessions and multi-turn subagents
+    const nextTurnCount = existingPin && !isCompactionBoundary ? existingPin.turnCount + 1 : 1;
+    sessionStore.set({
+      sessionKey,
+      model: selectedModel,
+      role: finalRole,
+      profile: finalProfile,
+      domain: signals.domain,
+      complexity: signals.complexity,
+      lastEstimatedTokens: verdict.estimatedInputTokens,
+      turnCount: nextTurnCount,
+      escalatedAtTurn: action === "escalate" ? nextTurnCount : (existingPin?.escalatedAtTurn ?? null),
+      escalationCount: action === "escalate" ? (existingPin?.escalationCount ?? 0) + 1 : (existingPin?.escalationCount ?? 0),
+      pinnedAtMs: existingPin && !isCompactionBoundary ? existingPin.pinnedAtMs : nowMs,
+      lastUsedAtMs: nowMs,
+    });
+
+    return finalizeDecision({
+      selectedModel,
+      rankedFallbacks: scoring.rankedCandidates.filter(c => c.proxyId !== selectedModel).map(c => c.proxyId),
+      action,
+      role: finalRole,
+      profile: finalProfile,
+      sessionKey,
+      cachePinned: true,
+      signals,
+      ...(stuckLoop ? { stuckLoop } : {}),
+      scoring: {
+        qualityScore: scoring.selected.qualityScore,
+        qMax: scoring.qMax,
+        qualityFloor: scoring.qualityFloor,
+        effectiveCost: scoring.selected.effectiveCost,
+        benchmarkRefs: scoring.selected.benchmarkRefs,
+        baselineModel: scoring.baselineModel,
+        estimatedSavingsPct: scoring.estimatedSavingsPct,
+      },
+      ...(signals.fallbackReason ? { fallbackReason: signals.fallbackReason } : {}),
+      latencyMs: {
+        total: performance.now() - tStart,
+        fastPath: fastMs,
+        classifier: clfMs,
+        scoring: scoreMs,
+      },
+    });
+  }
+
+  return {
+    route,
+    getStats: () => ({ ...stats, activePins: sessionStore.size() }),
+    clearSessions: () => sessionStore.clear(),
+    snapshot,
+    domains,
+  };
+}

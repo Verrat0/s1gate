@@ -1,0 +1,86 @@
+{
+  "name": "s1gate",
+  "version": "0.1.0",
+  "description": "System-1 cognitive model routing engine combining Jev/tev1/clef task classification with deterministic llm-stats.com benchmark scoring and KV cache protection.",
+  "license": "MIT",
+  "author": {
+    "name": "Albi Fahrizqi",
+    "url": "https://github.com/albifhrzq"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/albifhrzq/s1gate.git"
+  },
+  "homepage": "https://github.com/albifhrzq/s1gate#readme",
+  "bugs": {
+    "url": "https://github.com/albifhrzq/s1gate/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "llm-router",
+    "model-routing",
+    "system-one",
+    "jev",
+    "tev1",
+    "clef",
+    "kv-cache",
+    "agentic-coding",
+    "claude-code",
+    "codex",
+    "llm-stats"
+  ],
+  "files": [
+    "dist",
+    "data",
+    "LICENSE",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/http-bridge.d.ts",
+      "import": "./dist/server/http-bridge.js"
+    },
+    "./data/snapshot.json": "./data/snapshot.json",
+    "./data/domains.json": "./data/domains.json"
+  },
+  "bin": {
+    "s1gate": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run typecheck && npm run build && npm test",
+    "sync:offline": "bun scripts/sync-snapshot.ts --from-dir \"${S1GATE_LLM_STATS_DIR:-../data-s1gate/llm-stats}\"",
+    "sync:live": "bun scripts/sync-snapshot.ts --live"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^3.1.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  },
+  "s1gate": {
+    "benchmarkSource": "https://llm-stats.com",
+    "benchmarkAttribution": "Benchmark scores and model pricing sourced from llm-stats.com (ZeroEval)."
+  }
+}

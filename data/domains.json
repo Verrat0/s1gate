@@ -1,0 +1,133 @@
+[
+  {
+    "id": "software_engineering",
+    "description": "General software engineering, backend logic, refactoring, bug fixing, ORM and database code",
+    "benchmarkChain": [
+      "swe_bench_pro",
+      "deepswe_1_1",
+      "ramp_swe_bench_v2",
+      "swe_bench_verified",
+      "frontiercode_1_1",
+      "frontiercode_2_0",
+      "aider_polyglot",
+      "livecodebench_v6",
+      "gpqa"
+    ],
+    "redFlagSiblings": ["program_bench", "terminal_bench_4_0", "swe_bench_verified"]
+  },
+  {
+    "id": "terminal_devops",
+    "description": "Terminal commands, CLI debugging, Docker, CI/CD, Linux/macOS sysadmin, shell scripts",
+    "benchmarkChain": [
+      "terminal_bench_4_0",
+      "ramp_swe_bench_v2_bash",
+      "terminal_bench_2_1",
+      "deepswe_1_1",
+      "swe_bench_pro",
+      "swe_bench_verified",
+      "gpqa"
+    ],
+    "redFlagSiblings": ["terminal_bench_4_0", "program_bench"]
+  },
+  {
+    "id": "frontend_web",
+    "description": "Frontend UI, HTML/CSS/Tailwind, React/Vue/Next.js components, web layout and styling",
+    "benchmarkChain": [
+      "swe_bench_pro",
+      "deepswe_1_1",
+      "swe_bench_verified",
+      "ramp_swe_bench_v2",
+      "livecodebench_v6",
+      "gpqa"
+    ],
+    "redFlagSiblings": ["program_bench", "terminal_bench_4_0"]
+  },
+  {
+    "id": "agentic_tools",
+    "description": "Heavy multi-step tool calling, MCP workflows, API orchestration, autonomous debugging",
+    "benchmarkChain": [
+      "agents_last_exam",
+      "bfcl_v4",
+      "automationbench",
+      "toolathlon",
+      "mcp_atlas",
+      "osworld_2_0",
+      "deepswe_1_1",
+      "swe_bench_pro",
+      "gpqa"
+    ],
+    "redFlagSiblings": ["terminal_bench_4_0", "program_bench"]
+  },
+  {
+    "id": "research_architecture",
+    "description": "System architecture planning, complex trade-off analysis, deep multi-module research",
+    "benchmarkChain": [
+      "hle",
+      "humanity_s_last_exam",
+      "agents_last_exam",
+      "gpqa",
+      "browsecomp",
+      "deepswe_1_1",
+      "swe_bench_pro"
+    ],
+    "redFlagSiblings": ["gpqa", "program_bench"]
+  },
+  {
+    "id": "math_science",
+    "description": "Advanced mathematics, statistics, algorithms, scientific computing",
+    "benchmarkChain": [
+      "frontiermath",
+      "aime_2025",
+      "terminal_bench_science_0_1",
+      "gpqa",
+      "frontiercode_2_0"
+    ]
+  },
+  {
+    "id": "healthcare",
+    "description": "Clinical and medical domain logic, hospital EMR/SIMRS workflows, clinical coding, patient safety",
+    "benchmarkChain": [
+      "healthbench_professional",
+      "healthbench",
+      "gpqa",
+      "deepswe_1_1"
+    ]
+  },
+  {
+    "id": "finance_data",
+    "description": "Financial calculations, accounting, invoicing, tax and billing logic, spreadsheet data analysis",
+    "benchmarkChain": [
+      "finance_agent_v2",
+      "officeqa_pro",
+      "aime_2025",
+      "gpqa"
+    ]
+  },
+  {
+    "id": "legal",
+    "description": "Legal contracts, regulatory compliance, policy analysis",
+    "benchmarkChain": [
+      "legal_agent_benchmark",
+      "gpqa"
+    ]
+  },
+  {
+    "id": "writing_docs",
+    "description": "Technical documentation, commit summaries, prose writing, translation, explanations",
+    "benchmarkChain": [
+      "writingbench",
+      "simpleqa",
+      "gpqa"
+    ]
+  },
+  {
+    "id": "general_chat",
+    "description": "Simple Q&A, quick lookup, casual brainstorming, short clarifications",
+    "benchmarkChain": [
+      "simpleqa",
+      "gpqa",
+      "deepswe_1_1",
+      "swe_bench_verified"
+    ]
+  }
+]
