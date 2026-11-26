@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 680" width="1200" height="680" role="img" aria-label="s1gate Counterfactual Replay and Public Eval Benchmark Overview">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b101b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="barBalanced" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+    <linearGradient id="barFrugal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="barTrap" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f43f5e"/>
+      <stop offset="100%" stop-color="#fb7185"/>
+    </linearGradient>
+    <style>
+      .font { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    </style>
+  </defs>
+
+  <!-- Canvas -->
+  <rect width="1200" height="680" rx="18" fill="url(#bg)"/>
+  <rect x="1" y="1" width="1198" height="678" rx="17" fill="none" stroke="#1e293b" stroke-width="2"/>
+
+  <!-- Header -->
+  <text x="40" y="54" class="font" fill="#f8fafc" font-size="28" font-weight="700" letter-spacing="-0.5">s1gate</text>
+  <rect x="142" y="31" width="122" height="26" rx="13" fill="#1e293b" stroke="#334155"/>
+  <text x="203" y="49" text-anchor="middle" class="mono" fill="#34d399" font-size="12" font-weight="600">ROUTING ENGINE</text>
+
+  <text x="40" y="82" class="font" fill="#94a3b8" font-size="15">The right model, chosen with the right data — System-1 classification + deterministic llm-stats.com Pareto scoring</text>
+
+  <rect x="780" y="34" width="380" height="32" rx="16" fill="#0f172a" stroke="#1e293b"/>
+  <circle cx="800" cy="50" r="5" fill="#10b981"/>
+  <text x="814" y="55" class="mono" fill="#cbd5e1" font-size="12">1-Month Replay · 257 Sessions · 15,991 Turns</text>
+
+  <!-- KPI Strip (4 cards) -->
+  <!-- Card 1 -->
+  <rect x="40" y="106" width="265" height="92" rx="12" fill="#121a2b" stroke="#1e293b"/>
+  <text x="58" y="131" class="font" fill="#94a3b8" font-size="12" font-weight="600">BALANCED SAVINGS</text>
+  <text x="58" y="166" class="mono" fill="#34d399" font-size="30" font-weight="700">-54.5%</text>
+  <text x="58" y="186" class="mono" fill="#64748b" font-size="11">$1,038.26 vs $2,282.88 flagship</text>
+
+  <!-- Card 2 -->
+  <rect x="325" y="106" width="265" height="92" rx="12" fill="#121a2b" stroke="#1e293b"/>
+  <text x="343" y="131" class="font" fill="#94a3b8" font-size="12" font-weight="600">FRUGAL SAVINGS</text>
+  <text x="343" y="166" class="mono" fill="#22d3ee" font-size="30" font-weight="700">-83.8%</text>
+  <text x="343" y="186" class="mono" fill="#64748b" font-size="11">$370.09 vs $2,282.88 flagship</text>
+
+  <!-- Card 3 -->
+  <rect x="610" y="106" width="265" height="92" rx="12" fill="#121a2b" stroke="#1e293b"/>
+  <text x="628" y="131" class="font" fill="#94a3b8" font-size="12" font-weight="600">CACHE-READ SHARE</text>
+  <text x="628" y="166" class="mono" fill="#818cf8" font-size="30" font-weight="700">92.3%</text>
+  <text x="628" y="186" class="mono" fill="#64748b" font-size="11">Sticky KV pin (0ms) + switchTax</text>
+
+  <!-- Card 4 -->
+  <rect x="895" y="106" width="265" height="92" rx="12" fill="#121a2b" stroke="#1e293b"/>
+  <text x="913" y="131" class="font" fill="#94a3b8" font-size="12" font-weight="600">LOCAL EVAL (66 PROMPTS)</text>
+  <text x="913" y="166" class="mono" fill="#f8fafc" font-size="30" font-weight="700">7.25 ms</text>
+  <text x="913" y="186" class="mono" fill="#64748b" font-size="11">p50 · 11 domains · $0/1k local</text>
+
+  <!-- Left Panel: 1-Month Real Replay (257 Sessions / 15,991 Turns) -->
+  <rect x="40" y="218" width="665" height="390" rx="14" fill="#121a2b" stroke="#1e293b"/>
+  <text x="64" y="250" class="font" fill="#f8fafc" font-size="17" font-weight="700">1-Month Counterfactual Replay (Real Coding Sessions)</text>
+  <text x="64" y="271" class="font" fill="#94a3b8" font-size="12">257 sessions · 15,991 turns · 73-model catalog · clef:27b signals · llm-stats.com pricing</text>
+
+  <!-- Bar 1: Always Flagship ($2,282.88 -> width 430) -->
+  <text x="64" y="314" class="font" fill="#cbd5e1" font-size="13" font-weight="600">Always Flagship</text>
+  <text x="680" y="314" text-anchor="end" class="mono" fill="#cbd5e1" font-size="13" font-weight="600">$2,282.88  (baseline)</text>
+  <rect x="64" y="324" width="616" height="22" rx="6" fill="#0f172a"/>
+  <rect x="64" y="324" width="540" height="22" rx="6" fill="#475569"/>
+
+  <!-- Bar 2: Actual Logged ($1,709.27 -> 74.9% of 540 = 404) -->
+  <text x="64" y="374" class="font" fill="#cbd5e1" font-size="13" font-weight="600">Actual (Logged)</text>
+  <text x="680" y="374" text-anchor="end" class="mono" fill="#cbd5e1" font-size="13">$1,709.27  (-25.1%)</text>
+  <rect x="64" y="384" width="616" height="22" rx="6" fill="#0f172a"/>
+  <rect x="64" y="384" width="404" height="22" rx="6" fill="#64748b"/>
+
+  <!-- Bar 3: Naive Per-Turn ($1,602.43 -> 70.2% of 540 = 379) -->
+  <text x="64" y="434" class="font" fill="#fda4af" font-size="13" font-weight="600">Naive Per-Turn Router (KV Cache Bust)</text>
+  <text x="680" y="434" text-anchor="end" class="mono" fill="#fda4af" font-size="13">$1,602.43  (-29.8%)</text>
+  <rect x="64" y="444" width="616" height="22" rx="6" fill="#0f172a"/>
+  <rect x="64" y="444" width="379" height="22" rx="6" fill="url(#barTrap)"/>
+
+  <!-- Bar 4: s1gate Balanced ($1,038.26 -> 45.5% of 540 = 246) -->
+  <text x="64" y="494" class="font" fill="#34d399" font-size="13" font-weight="700">s1gate Balanced (Sticky Pin + Pareto)</text>
+  <text x="680" y="494" text-anchor="end" class="mono" fill="#34d399" font-size="13" font-weight="700">$1,038.26  (-54.5%)</text>
+  <rect x="64" y="504" width="616" height="24" rx="6" fill="#0f172a"/>
+  <rect x="64" y="504" width="246" height="24" rx="6" fill="url(#barBalanced)"/>
+
+  <!-- Bar 5: s1gate Frugal ($370.09 -> 16.2% of 540 = 88) -->
+  <text x="64" y="556" class="font" fill="#22d3ee" font-size="13" font-weight="700">s1gate Frugal</text>
+  <text x="680" y="556" text-anchor="end" class="mono" fill="#22d3ee" font-size="13" font-weight="700">$370.09  (-83.8%)</text>
+  <rect x="64" y="566" width="616" height="24" rx="6" fill="#0f172a"/>
+  <rect x="64" y="566" width="88" height="24" rx="6" fill="url(#barFrugal)"/>
+
+  <!-- Right Panel: Public Reproducible Demo + Safeguards -->
+  <rect x="725" y="218" width="435" height="390" rx="14" fill="#121a2b" stroke="#1e293b"/>
+  <text x="749" y="250" class="font" fill="#f8fafc" font-size="17" font-weight="700">Reproducible Demo: The KV Cache Trap</text>
+  <text x="749" y="271" class="mono" fill="#94a3b8" font-size="11">s1gate replay --demo · 16 sessions · 203 turns · 89.5% cache</text>
+
+  <!-- Mini Bar 1: Naive Per-Turn ($16.72 -> max width 385) -->
+  <text x="749" y="312" class="font" fill="#fda4af" font-size="12.5" font-weight="600">Naive Per-Turn (Cache Bust)</text>
+  <text x="1136" y="312" text-anchor="end" class="mono" fill="#fb7185" font-size="12.5" font-weight="700">$16.72  (+90.6%)</text>
+  <rect x="749" y="321" width="387" height="18" rx="5" fill="#0f172a"/>
+  <rect x="749" y="321" width="387" height="18" rx="5" fill="url(#barTrap)"/>
+
+  <!-- Mini Bar 2: Always Flagship ($8.77 -> 52.5% = 203) -->
+  <text x="749" y="364" class="font" fill="#cbd5e1" font-size="12.5" font-weight="600">Always Flagship</text>
+  <text x="1136" y="364" text-anchor="end" class="mono" fill="#cbd5e1" font-size="12.5">$8.77  (baseline)</text>
+  <rect x="749" y="373" width="387" height="18" rx="5" fill="#0f172a"/>
+  <rect x="749" y="373" width="203" height="18" rx="5" fill="#475569"/>
+
+  <!-- Mini Bar 3: s1gate Balanced ($4.92 -> 29.4% = 114) -->
+  <text x="749" y="416" class="font" fill="#34d399" font-size="12.5" font-weight="700">s1gate Balanced</text>
+  <text x="1136" y="416" text-anchor="end" class="mono" fill="#34d399" font-size="12.5" font-weight="700">$4.92  (-43.9%)</text>
+  <rect x="749" y="425" width="387" height="18" rx="5" fill="#0f172a"/>
+  <rect x="749" y="425" width="114" height="18" rx="5" fill="url(#barBalanced)"/>
+
+  <!-- Mini Bar 4: s1gate Frugal ($2.97 -> 17.8% = 69) -->
+  <text x="749" y="468" class="font" fill="#22d3ee" font-size="12.5" font-weight="700">s1gate Frugal</text>
+  <text x="1136" y="468" text-anchor="end" class="mono" fill="#22d3ee" font-size="12.5" font-weight="700">$2.97  (-66.1%)</text>
+  <rect x="749" y="477" width="387" height="18" rx="5" fill="#0f172a"/>
+  <rect x="749" y="477" width="69" height="18" rx="5" fill="url(#barFrugal)"/>
+
+  <!-- Why callout box -->
+  <rect x="749" y="514" width="387" height="76" rx="10" fill="#0f172a" stroke="#1e293b"/>
+  <text x="765" y="537" class="font" fill="#f8fafc" font-size="12.5" font-weight="700">Why Naive Per-Turn Routers Backfire</text>
+  <text x="765" y="556" class="font" fill="#94a3b8" font-size="11.5">Switching models mid-session discards ~90% prompt-cache reads.</text>
+  <text x="765" y="574" class="font" fill="#94a3b8" font-size="11.5">s1gate pins sessions at 0ms and escalates only on stuck loops.</text>
+
+  <!-- Footer -->
+  <text x="40" y="646" class="mono" fill="#64748b" font-size="12">Zero runtime deps · Pure Web-Standard core · Redacted PII/secret egress · Advisory reasoning effort · Data: llm-stats.com</text>
+  <text x="1160" y="646" text-anchor="end" class="mono" fill="#64748b" font-size="12">@albifhrzq/s1gate</text>
+</svg>

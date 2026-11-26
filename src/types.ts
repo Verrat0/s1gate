@@ -1,6 +1,8 @@
 export type InboundProtocol = "anthropic_messages" | "openai_responses" | "openai_chat";
 export type BudgetProfile = "frugal" | "balanced" | "quality";
 export type ExecutionRole = "orchestrator" | "subagent" | "specialist" | "auxiliary";
+export type RoutingAction = "route" | "pin_reuse" | "escalate" | "auxiliary" | "compact" | "passthrough";
+export type ReasoningEffort = "none" | "low" | "medium" | "high" | "max";
 export type HarnessId = "claude_code" | "codex" | "aider" | "opencode" | "cursor" | "generic";
 export type CompatTier = "native" | "translated_verified" | "degraded" | "unsupported";
 export type PrivacyMode = "standard" | "local_only";
@@ -150,6 +152,7 @@ export interface SessionPin {
   model: string;
   role: ExecutionRole;
   profile: BudgetProfile;
+  effort?: ReasoningEffort;
   domain: string;
   complexity: number;
   lastEstimatedTokens: number;
@@ -185,9 +188,10 @@ export interface ScoringResult {
 export interface S1GateDecision {
   selectedModel: string;
   rankedFallbacks: string[];
-  action: "route" | "pin_reuse" | "escalate" | "auxiliary" | "compact" | "passthrough";
+  action: RoutingAction;
   role: ExecutionRole;
   profile: BudgetProfile;
+  recommendedEffort?: ReasoningEffort;
   sessionKey: string | null;
   cachePinned: boolean;
   signals?: SystemOneSignals;

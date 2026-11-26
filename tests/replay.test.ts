@@ -454,4 +454,36 @@ describe("loadReplaySessionsFromSignalsFile", () => {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it("replays the bundled data/demo-signals.json with valid cost savings across profiles", () => {
+    const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+    const demoPath = join(repoRoot, "data", "demo-signals.json");
+    expect(existsSync(demoPath)).toBe(true);
+
+    const clefSessions = loadReplaySessionsFromSignalsFile(demoPath, "clef27b");
+    expect(clefSessions).toHaveLength(16);
+
+    const domainsCovered = new Set(clefSessions.map(s => s.signals.domain));
+    expect(domainsCovered.size).toBe(11);
+
+    const report = runCounterfactualReplay({
+      sessions: clefSessions,
+      availableModels: REAL_OCX_POOL,
+      flagshipModel: "anthropic/claude-opus-5-5",
+    });
+
+    expect(report.sessionsCount).toBe(16);
+    expect(report.totalTurns).toBeGreaterThan(100);
+    expect(report.flagshipCostUsd).toBeGreaterThan(0);
+    expect(report.profiles.balanced.totalCostUsd).toBeLessThan(report.flagshipCostUsd);
+    expect(report.profiles.frugal.totalCostUsd).toBeLessThanOrEqual(
+      report.profiles.balanced.totalCostUsd,
+    );
+    expect(report.profiles.balanced.savedVsFlagshipPct).toBeGreaterThan(0);
+    expect(Object.keys(report.profiles.balanced.modelMix).length).toBeGreaterThan(0);
+
+    const tevSessions = loadReplaySessionsFromSignalsFile(demoPath, "tev1_4b");
+    expect(tevSessions).toHaveLength(16);
+    expect(tevSessions[0].signals.backend).toBe("tev1:4b");
+  });
 });

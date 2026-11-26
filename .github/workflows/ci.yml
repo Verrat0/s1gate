@@ -20,4 +20,38 @@ jobs:
       - run: npm install
       - run: npm run typecheck
       - run: npm run build
-      - run: npm test
+      - run: npm run test:coverage
+      - name: Verify core Web-Standard purity
+        run: |
+          node --input-type=module <<'EOF'
+          import fs from "node:fs";
+          import path from "node:path";
+
+          const visited = new Set();
+          const queue = [path.resolve("dist/core/index.js")];
+          const importRe = /(?:(?:import|export)\s+(?:[^"']*?\s+from\s+)?|import\s*\(\s*)["']([^"']+)["']/g;
+          const violations = [];
+
+          while (queue.length > 0) {
+            const file = queue.shift();
+            if (visited.has(file)) continue;
+            visited.add(file);
+            const content = fs.readFileSync(file, "utf8");
+            for (const match of content.matchAll(importRe)) {
+              const spec = match[1];
+              if (spec.startsWith("node:")) {
+                violations.push(`${path.relative(process.cwd(), file)} -> ${spec}`);
+              } else if (spec.startsWith("./") || spec.startsWith("../")) {
+                queue.push(path.resolve(path.dirname(file), spec));
+              }
+            }
+          }
+
+          if (violations.length > 0) {
+            console.error("Disallowed node:* imports reachable from dist/core/index.js:\n" + violations.join("\n"));
+            process.exit(1);
+          }
+          console.log(`Core purity verified: 0 reachable node:* imports across ${visited.size} file(s).`);
+          EOF
+      - name: Verify npm package tarball
+        run: npm publish --dry-run

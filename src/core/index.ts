@@ -1,4 +1,5 @@
 export * from "../types.js";
+export type { ReasoningEffort, RoutingAction } from "../types.js";
 export {
   buildCandidatePool,
   isNonChatUtilityModel,
@@ -9,9 +10,14 @@ export { buildRoutingEnvelope, redactSensitiveText } from "./envelope.js";
 export {
   buildResponseHeaders,
   createS1Gate,
+  resolveRecommendedEffort,
   type S1GateEngine,
   type S1GateStats,
 } from "./engine.js";
+export {
+  createRoutingFetch,
+  type RoutingFetchOptions,
+} from "./fetch-middleware.js";
 export {
   inspectFastPath,
   parseVirtualModelHint,

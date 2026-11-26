@@ -7,10 +7,13 @@ import type {
   ClassifierAdapter,
   DomainDefinition,
   ExecutionRole,
+  ReasoningEffort,
+  RoutingAction,
   S1GateConfig,
   S1GateDecision,
   S1GateRequest,
   SessionPin,
+  StuckLevel,
   StuckLoopReport,
   SystemOneSignals,
 } from "../types.js";
@@ -49,6 +52,70 @@ export interface S1GateEngine {
 const ESCALATION_QUALITY_TOLERANCE = 0.03;
 const MAX_CALLER_CONTEXT_TOKENS = 10_000_000;
 const MIN_REQUIRED_CONTEXT_TOKENS = 32_000;
+const EFFORT_ORDER: readonly ReasoningEffort[] = ["none", "low", "medium", "high", "max"];
+
+function bumpEffortOneStep(effort: ReasoningEffort): ReasoningEffort {
+  const idx = EFFORT_ORDER.indexOf(effort);
+  if (idx < 0 || idx >= EFFORT_ORDER.length - 1) return "max";
+  return EFFORT_ORDER[idx + 1];
+}
+
+function computeRouteEffort(
+  profile: BudgetProfile,
+  role: ExecutionRole,
+  complexity: number,
+): ReasoningEffort {
+  if (profile === "frugal") {
+    const base: ReasoningEffort =
+      complexity >= 0.75 ? "medium" : complexity >= 0.40 ? "low" : "none";
+    return role === "orchestrator" ? bumpEffortOneStep(base) : base;
+  }
+  if (profile === "balanced") {
+    if (complexity >= 0.70) return "high";
+    if (complexity >= 0.35) return "medium";
+    return "low";
+  }
+  // quality
+  if (role === "orchestrator" && complexity >= 0.85) return "max";
+  if (complexity >= 0.65 || role === "orchestrator") return "high";
+  return "medium";
+}
+
+export function resolveRecommendedEffort(params: {
+  action: RoutingAction;
+  profile: BudgetProfile;
+  role: ExecutionRole;
+  complexity: number;
+  stuckLevel?: StuckLevel;
+  priorEffort?: ReasoningEffort;
+}): ReasoningEffort | undefined {
+  const { action, profile, role, stuckLevel, priorEffort } = params;
+  if (action === "passthrough") return undefined;
+  if (action === "compact") return "low";
+  if (action === "auxiliary") return profile === "frugal" ? "none" : "low";
+
+  const complexity = Number.isFinite(params.complexity)
+    ? Math.min(1, Math.max(0, params.complexity))
+    : 0.5;
+
+  if (action === "pin_reuse") {
+    return priorEffort ?? computeRouteEffort(profile, role, complexity);
+  }
+
+  if (action === "escalate") {
+    if (
+      priorEffort === "max" ||
+      priorEffort === "high" ||
+      (profile === "quality" && complexity >= 0.75) ||
+      (stuckLevel === "hard" && complexity >= 0.75)
+    ) {
+      return "max";
+    }
+    return "high";
+  }
+
+  return computeRouteEffort(profile, role, complexity);
+}
 
 export function resolveCallerContextTokens(req: S1GateRequest): number {
   const fieldTokens =
@@ -97,6 +164,9 @@ export function buildResponseHeaders(
   };
   if (typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0) {
     raw["X-Router-Context-Window"] = String(Math.floor(contextWindow));
+  }
+  if (decision.recommendedEffort) {
+    raw["X-Router-Effort"] = decision.recommendedEffort;
   }
   if (decision.signals?.domain) {
     raw["X-Router-Domain"] = decision.signals.domain;
@@ -313,6 +383,12 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
       const ctxWin = availableModels.includes(selectedModel)
         ? resolveContextWindow(selectedModel)
         : undefined;
+      const recommendedEffort = resolveRecommendedEffort({
+        action: "compact",
+        profile,
+        role: "auxiliary",
+        complexity: 0,
+      });
       return finalizeDecision(
         {
           selectedModel,
@@ -320,6 +396,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
           action: "compact",
           role: "auxiliary",
           profile,
+          ...(recommendedEffort ? { recommendedEffort } : {}),
           sessionKey,
           cachePinned: false,
           latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
@@ -337,6 +414,12 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
       const ctxWin = availableModels.includes(selectedModel)
         ? resolveContextWindow(selectedModel)
         : undefined;
+      const recommendedEffort = resolveRecommendedEffort({
+        action: "auxiliary",
+        profile,
+        role: "auxiliary",
+        complexity: 0,
+      });
       return finalizeDecision(
         {
           selectedModel,
@@ -344,6 +427,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
           action: "auxiliary",
           role: "auxiliary",
           profile,
+          ...(recommendedEffort ? { recommendedEffort } : {}),
           sessionKey: null,
           cachePinned: false,
           latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
@@ -426,8 +510,16 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
         // Reuse sticky pin immediately (0ms!) when healthy or locked by ratchet hysteresis
         if (!stuckLoop || stuckLoop.level === "none" || locked) {
           stats.pinReuses += 1;
+          const recommendedEffort = resolveRecommendedEffort({
+            action: "pin_reuse",
+            profile: existingPin.profile,
+            role: existingPin.role,
+            complexity: existingPin.complexity,
+            priorEffort: existingPin.effort,
+          });
           const updatedPin: SessionPin = {
             ...existingPin,
+            ...(recommendedEffort ? { effort: recommendedEffort } : {}),
             turnCount: existingPin.turnCount + 1,
             lastEstimatedTokens: effectiveContextTokens,
             lastUsedAtMs: nowMs,
@@ -441,6 +533,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
               action: "pin_reuse",
               role: existingPin.role,
               profile: existingPin.profile,
+              ...(recommendedEffort ? { recommendedEffort } : {}),
               sessionKey,
               cachePinned: true,
               ...(stuckLoop ? { stuckLoop } : {}),
@@ -483,6 +576,14 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
           );
           const scoreMs = performance.now() - tScoreStart;
           const nextModel = scoring.selected.proxyId;
+          const recommendedEffort = resolveRecommendedEffort({
+            action: "escalate",
+            profile: "quality",
+            role: "orchestrator",
+            complexity: escSignals.complexity,
+            stuckLevel: stuckLoop.level,
+            priorEffort: existingPin.effort,
+          });
           stats.escalations += 1;
 
           sessionStore.set({
@@ -490,6 +591,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
             model: nextModel,
             role: "orchestrator",
             profile: "quality",
+            ...(recommendedEffort ? { effort: recommendedEffort } : {}),
             complexity: escSignals.complexity,
             turnCount: existingPin.turnCount + 1,
             escalatedAtTurn: existingPin.turnCount + 1,
@@ -505,6 +607,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
               action: "escalate",
               role: "orchestrator",
               profile: "quality",
+              ...(recommendedEffort ? { recommendedEffort } : {}),
               sessionKey,
               cachePinned: true,
               stuckLoop,
@@ -561,8 +664,16 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
     // Soft stuck check decided NOT to escalate -> keep sticky pin!
     if (isSoftStuckCheck && existingPin && stuckLoop && !shouldSoftEscalate(signals.shouldEscalate, stuckLoop, noulEscThreshold)) {
       stats.pinReuses += 1;
+      const recommendedEffort = resolveRecommendedEffort({
+        action: "pin_reuse",
+        profile: existingPin.profile,
+        role: existingPin.role,
+        complexity: existingPin.complexity,
+        priorEffort: existingPin.effort,
+      });
       sessionStore.set({
         ...existingPin,
+        ...(recommendedEffort ? { effort: recommendedEffort } : {}),
         turnCount: existingPin.turnCount + 1,
         lastEstimatedTokens: effectiveContextTokens,
         lastUsedAtMs: nowMs,
@@ -574,6 +685,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
           action: "pin_reuse",
           role: existingPin.role,
           profile: existingPin.profile,
+          ...(recommendedEffort ? { recommendedEffort } : {}),
           sessionKey,
           cachePinned: true,
           signals,
@@ -650,6 +762,14 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
     }
 
     if (action === "escalate") stats.escalations += 1;
+    const recommendedEffort = resolveRecommendedEffort({
+      action,
+      profile: finalProfile,
+      role: finalRole,
+      complexity: action === "pin_reuse" && existingPin ? existingPin.complexity : signals.complexity,
+      ...(stuckLoop ? { stuckLevel: stuckLoop.level } : {}),
+      ...(action !== "route" && existingPin?.effort ? { priorEffort: existingPin.effort } : {}),
+    });
     const scoreMs = performance.now() - tScoreStart;
 
     // Persist sticky pin for main sessions and multi-turn subagents
@@ -659,6 +779,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
       model: selectedModel,
       role: finalRole,
       profile: finalProfile,
+      ...(recommendedEffort ? { effort: recommendedEffort } : {}),
       domain: signals.domain,
       complexity: signals.complexity,
       lastEstimatedTokens: effectiveContextTokens,
@@ -676,6 +797,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
         action,
         role: finalRole,
         profile: finalProfile,
+        ...(recommendedEffort ? { recommendedEffort } : {}),
         sessionKey,
         cachePinned: true,
         signals,

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildResponseHeaders, createS1Gate, resolveCallerContextTokens } from "../src/core/engine.js";
+import {
+  buildResponseHeaders,
+  createS1Gate,
+  resolveCallerContextTokens,
+  resolveRecommendedEffort,
+} from "../src/core/engine.js";
 import type { ClassifierAdapter, S1GateRequest, SystemOneSignals } from "../src/types.js";
 
 const ACTIVE_MODELS = [
@@ -786,5 +791,273 @@ describe("S1GateEngine end-to-end orchestration", () => {
     });
     expect(res.selectedModel).toBe("ollama-cloud/gpt-oss:120b");
     expect(res.headers["X-Router-Context-Window"]).toBe("131072");
+  });
+
+  it("resolves deterministic recommendedEffort across actions, profiles, roles, and escalation", () => {
+    // passthrough -> undefined
+    expect(
+      resolveRecommendedEffort({
+        action: "passthrough",
+        profile: "balanced",
+        role: "specialist",
+        complexity: 0.8,
+      }),
+    ).toBeUndefined();
+
+    // compact -> low across profiles
+    expect(
+      resolveRecommendedEffort({ action: "compact", profile: "frugal", role: "auxiliary", complexity: 0 }),
+    ).toBe("low");
+    expect(
+      resolveRecommendedEffort({ action: "compact", profile: "quality", role: "auxiliary", complexity: 0 }),
+    ).toBe("low");
+
+    // auxiliary -> none on frugal, low on balanced/quality
+    expect(
+      resolveRecommendedEffort({ action: "auxiliary", profile: "frugal", role: "auxiliary", complexity: 0 }),
+    ).toBe("none");
+    expect(
+      resolveRecommendedEffort({ action: "auxiliary", profile: "balanced", role: "auxiliary", complexity: 0 }),
+    ).toBe("low");
+    expect(
+      resolveRecommendedEffort({ action: "auxiliary", profile: "quality", role: "auxiliary", complexity: 0 }),
+    ).toBe("low");
+
+    // route across frugal / balanced / quality
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "frugal", role: "specialist", complexity: 0.2 }),
+    ).toBe("none");
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "frugal", role: "specialist", complexity: 0.5 }),
+    ).toBe("low");
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "frugal", role: "specialist", complexity: 0.8 }),
+    ).toBe("medium");
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "frugal", role: "orchestrator", complexity: 0.2 }),
+    ).toBe("low");
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "frugal", role: "orchestrator", complexity: 0.5 }),
+    ).toBe("medium");
+
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "balanced", role: "specialist", complexity: 0.2 }),
+    ).toBe("low");
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "balanced", role: "specialist", complexity: 0.5 }),
+    ).toBe("medium");
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "balanced", role: "specialist", complexity: 0.72 }),
+    ).toBe("high");
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "balanced", role: "orchestrator", complexity: 0.8 }),
+    ).toBe("high");
+
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "quality", role: "specialist", complexity: 0.4 }),
+    ).toBe("medium");
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "quality", role: "specialist", complexity: 0.7 }),
+    ).toBe("high");
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "quality", role: "orchestrator", complexity: 0.5 }),
+    ).toBe("high");
+    expect(
+      resolveRecommendedEffort({ action: "route", profile: "quality", role: "orchestrator", complexity: 0.85 }),
+    ).toBe("max");
+
+    // pin_reuse preserves priorEffort without downgrading
+    expect(
+      resolveRecommendedEffort({
+        action: "pin_reuse",
+        profile: "frugal",
+        role: "specialist",
+        complexity: 0.1,
+        priorEffort: "high",
+      }),
+    ).toBe("high");
+    expect(
+      resolveRecommendedEffort({
+        action: "pin_reuse",
+        profile: "balanced",
+        role: "specialist",
+        complexity: 0.5,
+      }),
+    ).toBe("medium");
+
+    // escalate bumps monotonically upward (at least high; high -> max)
+    expect(
+      resolveRecommendedEffort({
+        action: "escalate",
+        profile: "balanced",
+        role: "orchestrator",
+        complexity: 0.5,
+        stuckLevel: "soft",
+        priorEffort: "low",
+      }),
+    ).toBe("high");
+    expect(
+      resolveRecommendedEffort({
+        action: "escalate",
+        profile: "balanced",
+        role: "orchestrator",
+        complexity: 0.5,
+        stuckLevel: "soft",
+        priorEffort: "high",
+      }),
+    ).toBe("max");
+    expect(
+      resolveRecommendedEffort({
+        action: "escalate",
+        profile: "quality",
+        role: "orchestrator",
+        complexity: 0.85,
+        stuckLevel: "hard",
+        priorEffort: "medium",
+      }),
+    ).toBe("max");
+  });
+
+  it("emits recommendedEffort & X-Router-Effort end-to-end, preserves on 0ms pin_reuse, bumps high->max on lone-flagship escalate, and omits on passthrough", async () => {
+    // 1. Auxiliary & compact effort
+    const frugalGate = createS1Gate({
+      defaultProfile: "frugal",
+      classifier: mockClassifier({ complexity: 0.25 }),
+    });
+    const auxFrugal = await frugalGate.route({
+      protocol: "anthropic_messages",
+      headers: {},
+      body: {
+        model: "s1gate",
+        max_tokens: 64,
+        system: "Generate a concise 4-word title for this conversation.",
+        messages: [{ role: "user", content: "Fix logs" }],
+      },
+      availableModels: ACTIVE_MODELS,
+    });
+    expect(auxFrugal.action).toBe("auxiliary");
+    expect(auxFrugal.recommendedEffort).toBe("none");
+    expect(auxFrugal.headers["X-Router-Effort"]).toBe("none");
+
+    const compactRes = await frugalGate.route({
+      protocol: "openai_responses",
+      path: "/v1/responses/compact",
+      headers: { "session-id": "sess-eff-compact" },
+      body: { model: "s1gate", input: "Summarize history" },
+      availableModels: ACTIVE_MODELS,
+    });
+    expect(compactRes.action).toBe("compact");
+    expect(compactRes.recommendedEffort).toBe("low");
+    expect(compactRes.headers["X-Router-Effort"]).toBe("low");
+
+    // 2. Passthrough omits recommendedEffort and X-Router-Effort
+    const passGate = createS1Gate({
+      defaultProfile: "balanced",
+      triggerModels: ["s1gate"],
+      classifier: mockClassifier(),
+    });
+    const passRes = await passGate.route({
+      protocol: "openai_chat",
+      headers: {},
+      body: {
+        model: "anthropic/claude-sonnet-5-5",
+        messages: [{ role: "user", content: "Hello" }],
+      },
+      availableModels: ACTIVE_MODELS,
+    });
+    expect(passRes.action).toBe("passthrough");
+    expect(passRes.recommendedEffort).toBeUndefined();
+    expect(passRes.headers["X-Router-Effort"]).toBeUndefined();
+
+    // 3. Initial route -> 0ms pin_reuse preserves pinned effort -> lone flagship escalate bumps high -> max
+    const clf = mockClassifier({
+      domain: "software_engineering",
+      domainProbabilities: { software_engineering: 1 },
+      complexity: 0.8,
+      needsFlagshipOrchestrator: 0.95,
+    });
+    const loneGate = createS1Gate({ defaultProfile: "balanced", classifier: clf });
+    const lonePool = ["anthropic/claude-opus-5-5", "anthropic/claude-haiku-5-5"];
+
+    const t1 = await loneGate.route({
+      protocol: "anthropic_messages",
+      headers: { "x-claude-code-session-id": "sess-eff-lone" },
+      body: {
+        model: "s1gate",
+        tools: [{ name: "Agent" }, { name: "bash" }],
+        messages: [{ role: "user", content: "Design distributed consensus state machine" }],
+      },
+      availableModels: lonePool,
+      nowMs: 2_000_000,
+    });
+    expect(t1.action).toBe("route");
+    expect(t1.selectedModel).toBe("anthropic/claude-opus-5-5");
+    expect(t1.recommendedEffort).toBe("high");
+    expect(t1.headers["X-Router-Effort"]).toBe("high");
+    expect(clf.calls).toBe(1);
+
+    // Turn 2 healthy -> 0ms pin_reuse preserves "high"
+    const t2 = await loneGate.route({
+      protocol: "anthropic_messages",
+      headers: { "x-claude-code-session-id": "sess-eff-lone" },
+      body: {
+        model: "s1gate",
+        tools: [{ name: "Agent" }, { name: "bash" }],
+        messages: [
+          { role: "user", content: "Design distributed consensus state machine" },
+          { role: "assistant", content: "Drafting Raft log replication." },
+          { role: "user", content: "Add snapshot installation" },
+        ],
+      },
+      availableModels: lonePool,
+      nowMs: 2_005_000,
+    });
+    expect(t2.action).toBe("pin_reuse");
+    expect(t2.recommendedEffort).toBe("high");
+    expect(t2.headers["X-Router-Effort"]).toBe("high");
+    expect(clf.calls).toBe(1);
+
+    // Turn 3 hard stuck loop while already on lone flagship -> keeps opus, bumps effort high -> max!
+    const stuckMessages = [
+      { role: "user", content: "Design distributed consensus state machine" },
+      { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "bash", input: { cmd: "pytest" } }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", is_error: true, content: "AssertionError: term mismatch" }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "t2", name: "bash", input: { cmd: "pytest" } }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "t2", is_error: true, content: "AssertionError: term mismatch" }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "t3", name: "bash", input: { cmd: "pytest" } }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "t3", is_error: true, content: "AssertionError: term mismatch" }] },
+    ];
+    const t3 = await loneGate.route({
+      protocol: "anthropic_messages",
+      headers: { "x-claude-code-session-id": "sess-eff-lone" },
+      body: {
+        model: "s1gate",
+        tools: [{ name: "Agent" }, { name: "bash" }],
+        messages: stuckMessages,
+      },
+      availableModels: lonePool,
+      nowMs: 2_010_000,
+    });
+    expect(t3.action).toBe("escalate");
+    expect(t3.selectedModel).toBe("anthropic/claude-opus-5-5");
+    expect(t3.recommendedEffort).toBe("max");
+    expect(t3.headers["X-Router-Effort"]).toBe("max");
+    expect(clf.calls).toBe(1);
+
+    // Turn 4 hysteresis pin_reuse preserves bumped "max"
+    const t4 = await loneGate.route({
+      protocol: "anthropic_messages",
+      headers: { "x-claude-code-session-id": "sess-eff-lone" },
+      body: {
+        model: "s1gate",
+        tools: [{ name: "Agent" }, { name: "bash" }],
+        messages: stuckMessages,
+      },
+      availableModels: lonePool,
+      nowMs: 2_015_000,
+    });
+    expect(t4.action).toBe("pin_reuse");
+    expect(t4.recommendedEffort).toBe("max");
+    expect(t4.headers["X-Router-Effort"]).toBe("max");
   });
 });

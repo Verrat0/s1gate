@@ -1,0 +1,537 @@
+[
+  {
+    "id": "se-01",
+    "prompt": "Fix a typo in the TypeScript helper function name that formats SQL dates.",
+    "expectedDomain": "software_engineering",
+    "expectedRole": "auxiliary",
+    "expectedComplexityBand": "low",
+    "hasTools": false,
+    "maxTokens": 256
+  },
+  {
+    "id": "se-02",
+    "prompt": "Write a simple TypeScript function to validate an API endpoint request schema and add a vitest unit test.",
+    "expectedDomain": "software_engineering",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "se-03",
+    "prompt": "Debug a backend ORM query bug in our Python controller where pagination skips records on the SQL database model.",
+    "expectedDomain": "software_engineering",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "se-04",
+    "prompt": "Add a parameterized SQL query to the TypeScript repository class and write pytest or vitest unit tests for the endpoint.",
+    "expectedDomain": "software_engineering",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "se-05",
+    "prompt": "Refactor the backend ORM transaction manager to eliminate a database deadlock and race condition during zero-downtime schema migration across API endpoints.",
+    "expectedDomain": "software_engineering",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "se-06",
+    "prompt": "Design and implement a concurrency-safe backend database migration and security audit for the Python SQL controller and transaction layer.",
+    "expectedDomain": "software_engineering",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "devops-01",
+    "prompt": "Give a one-liner bash chmod command for an SSH private key on Linux.",
+    "expectedDomain": "terminal_devops",
+    "expectedRole": "auxiliary",
+    "expectedComplexityBand": "low",
+    "hasTools": false,
+    "maxTokens": 256
+  },
+  {
+    "id": "devops-02",
+    "prompt": "Write a simple cron schedule and curl healthcheck shell script for an nginx container on Linux.",
+    "expectedDomain": "terminal_devops",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "devops-03",
+    "prompt": "Fix our Docker compose file and GitHub Actions CI/CD deploy pipeline so the Linux container starts cleanly under systemd.",
+    "expectedDomain": "terminal_devops",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "devops-04",
+    "prompt": "Troubleshoot an nginx reverse proxy timeout and Kubernetes ingress firewall rule from the terminal CLI.",
+    "expectedDomain": "terminal_devops",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "devops-05",
+    "prompt": "Audit and harden our Linux systemd container runtime, SSH firewall rules, and nginx TLS proxy security configuration.",
+    "expectedDomain": "terminal_devops",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "devops-06",
+    "prompt": "Execute a zero-downtime Kubernetes cluster migration across our Docker CI/CD deploy pipeline with shell security hardening and distributed proxy failover.",
+    "expectedDomain": "terminal_devops",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "fe-01",
+    "prompt": "How do I center a button inside a CSS flexbox navbar?",
+    "expectedDomain": "frontend_web",
+    "expectedRole": "auxiliary",
+    "expectedComplexityBand": "low",
+    "hasTools": false,
+    "maxTokens": 256
+  },
+  {
+    "id": "fe-02",
+    "prompt": "Create a simple responsive Tailwind CSS grid layout for a React card component in HTML.",
+    "expectedDomain": "frontend_web",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "fe-03",
+    "prompt": "Build an accessible Next.js modal component with Tailwind CSS animation, keyboard focus trapping, and clean UX styling.",
+    "expectedDomain": "frontend_web",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "fe-04",
+    "prompt": "Fix a Vue and SCSS responsive navbar layout shift in the browser DOM when toggling mobile menu buttons.",
+    "expectedDomain": "frontend_web",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "fe-05",
+    "prompt": "Compare Svelte and Astro hydration behavior for interactive HTML UI components and CSS animations in the browser DOM.",
+    "expectedDomain": "frontend_web",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "fe-06",
+    "prompt": "Refactor our Next.js React frontend UI component library and Tailwind CSS grid layout to eliminate hydration race condition bugs and benchmark browser DOM concurrency.",
+    "expectedDomain": "frontend_web",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "agent-01",
+    "prompt": "Write a simple MCP tool calling manifest for an autonomous browser automation helper.",
+    "expectedDomain": "agentic_tools",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "agent-02",
+    "prompt": "Configure a Playwright browser_click automation workflow for a multi-step agentic smoke check.",
+    "expectedDomain": "agentic_tools",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "agent-03",
+    "prompt": "Implement a simple multi-step MCP tool calling workflow that delegates page checks to a Playwright subagent.",
+    "expectedDomain": "agentic_tools",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "agent-04",
+    "prompt": "Orchestrate an autonomous multi-step MCP subagent workflow with concurrency limits, security sandboxing, and deadlock recovery during tool calling.",
+    "expectedDomain": "agentic_tools",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "agent-05",
+    "prompt": "Build a distributed agentic automation orchestrator that coordinates parallel Playwright subagent tool calling with transaction rollback and benchmark telemetry.",
+    "expectedDomain": "agentic_tools",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "agent-06",
+    "prompt": "Refactor our autonomous MCP tool calling workflow to resolve race condition failures across concurrent subagent runs and benchmark agentic automation reliability.",
+    "expectedDomain": "agentic_tools",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "arch-01",
+    "prompt": "Give a simple comparison of monolith versus microservices scalability trade-off patterns for an early blueprint.",
+    "expectedDomain": "research_architecture",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "arch-02",
+    "prompt": "Draft a system design RFC comparing event-driven microservices and modular monolith trade-offs for long-term scalability.",
+    "expectedDomain": "research_architecture",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "arch-03",
+    "prompt": "Research caching and replication trade-off options in a multi-region blueprint and write a concise comparison summary.",
+    "expectedDomain": "research_architecture",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "arch-04",
+    "prompt": "Design a distributed multi-tenant sharding architecture and zero-downtime migration plan RFC with Raft consensus trade-off analysis.",
+    "expectedDomain": "research_architecture",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "arch-05",
+    "prompt": "Produce a full system design blueprint for migrating legacy microservices to a multi-tenant distributed architecture with security isolation and scalability benchmarks.",
+    "expectedDomain": "research_architecture",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "arch-06",
+    "prompt": "Conduct deep research on consensus trade-offs and database sharding architecture for a high-concurrency distributed multi-tenant migration plan.",
+    "expectedDomain": "research_architecture",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "math-01",
+    "prompt": "What is the simple closed-form integral of x squared in basic calculus?",
+    "expectedDomain": "math_science",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "math-02",
+    "prompt": "Compute the eigenvalues of a 2x2 symmetric matrix using linear algebra and verify the probability normalization.",
+    "expectedDomain": "math_science",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "math-03",
+    "prompt": "Formulate a Bayesian linear regression model with conjugate priors and derive the posterior statistics update.",
+    "expectedDomain": "math_science",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "math-04",
+    "prompt": "Implement a convex optimization algorithm to solve a sparse matrix differential equation and verify numerical stability.",
+    "expectedDomain": "math_science",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "math-05",
+    "prompt": "Analyze the time complexity O(n log n) of a divide-and-conquer physics simulation algorithm and verify its statistical convergence.",
+    "expectedDomain": "math_science",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "math-06",
+    "prompt": "Prove the convergence theorem for a distributed stochastic optimization algorithm using matrix eigenvalues, Bayesian probability bounds, and benchmark cryptography security guarantees.",
+    "expectedDomain": "math_science",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "health-01",
+    "prompt": "What is the simple structure of an ICD-10 diagnosis code used in hospital EMR clinical records?",
+    "expectedDomain": "healthcare",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "health-02",
+    "prompt": "Map an HL7 v2 lab result message into a FHIR DiagnosticReport resource for a hospital clinical EMR feed.",
+    "expectedDomain": "healthcare",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "health-03",
+    "prompt": "Design an emergency department patient triage scoring checklist for nursing and radiology intake workflows.",
+    "expectedDomain": "healthcare",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "health-04",
+    "prompt": "Validate pharmacy medication dosage safety checks against patient allergy records in a clinical EMR module.",
+    "expectedDomain": "healthcare",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "health-05",
+    "prompt": "Explain how medical imaging radiology orders link to ICD-10 diagnosis codes and FHIR patient encounters.",
+    "expectedDomain": "healthcare",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "health-06",
+    "prompt": "Architect a zero-downtime clinical EMR migration across hospital FHIR, HL7 lab result, pharmacy, and patient triage services with strict security and transaction concurrency guarantees.",
+    "expectedDomain": "healthcare",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "fin-01",
+    "prompt": "What is the simple formula for gross margin on a company P&L financial balance sheet?",
+    "expectedDomain": "finance_data",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "fin-02",
+    "prompt": "Write a spreadsheet formula to calculate quarterly VAT tax and net revenue totals for customer invoicing.",
+    "expectedDomain": "finance_data",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "fin-03",
+    "prompt": "Build an accounting ledger journal reconciliation script that flags mismatched invoice and billing payments.",
+    "expectedDomain": "finance_data",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "fin-04",
+    "prompt": "Create a monthly payroll and operating budget variance model from general ledger accounting exports.",
+    "expectedDomain": "finance_data",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "fin-05",
+    "prompt": "Audit multi-currency invoice tax rounding discrepancies between our billing ledger and financial P&L spreadsheet.",
+    "expectedDomain": "finance_data",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "fin-06",
+    "prompt": "Refactor our distributed accounting ledger and invoicing reconciliation engine to prevent race condition double-billing during zero-downtime tax and payroll migration transactions.",
+    "expectedDomain": "finance_data",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "legal-01",
+    "prompt": "What is the simple difference between an NDA confidentiality clause and a software license policy?",
+    "expectedDomain": "legal",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "legal-02",
+    "prompt": "Review a SaaS contract indemnity and limitation of liability clause against standard commercial legal terms of service.",
+    "expectedDomain": "legal",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "legal-03",
+    "prompt": "Draft a GDPR and HIPAA data processing compliance addendum covering retention policy and statutory breach notice.",
+    "expectedDomain": "legal",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "legal-04",
+    "prompt": "Compare Apache-2.0 and MIT open-source license compliance obligations for commercial software distribution contracts.",
+    "expectedDomain": "legal",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "legal-05",
+    "prompt": "Identify regulatory compliance gaps in our vendor NDA, terms of service policy, and cross-border GDPR regulation controls.",
+    "expectedDomain": "legal",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "legal-06",
+    "prompt": "Coordinate a multi-jurisdiction GDPR and HIPAA regulatory compliance security audit across contract liability, indemnity, and data migration architecture policies.",
+    "expectedDomain": "legal",
+    "expectedRole": "orchestrator",
+    "expectedComplexityBand": "high",
+    "hasTools": true
+  },
+  {
+    "id": "docs-01",
+    "prompt": "Write a concise git commit message summarizing a README typo fix.",
+    "expectedDomain": "writing_docs",
+    "expectedRole": "auxiliary",
+    "expectedComplexityBand": "low",
+    "hasTools": false,
+    "maxTokens": 256
+  },
+  {
+    "id": "docs-02",
+    "prompt": "Summarize these release notes into two short changelog bullets.",
+    "expectedDomain": "writing_docs",
+    "expectedRole": "auxiliary",
+    "expectedComplexityBand": "low",
+    "hasTools": false,
+    "maxTokens": 256
+  },
+  {
+    "id": "docs-03",
+    "prompt": "Translate this short product documentation summary into clear English prose with friendly copywriting tone.",
+    "expectedDomain": "writing_docs",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "docs-04",
+    "prompt": "Draft structured release notes and a changelog section explaining breaking changes in our technical documentation.",
+    "expectedDomain": "writing_docs",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "docs-05",
+    "prompt": "Write an engineering blog article and README quickstart guide that clearly explain our SDK docstrings and examples.",
+    "expectedDomain": "writing_docs",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "docs-06",
+    "prompt": "Rewrite our developer documentation portal, changelog archive, and translation style guide for consistent technical prose and copywriting.",
+    "expectedDomain": "writing_docs",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": true
+  },
+  {
+    "id": "chat-01",
+    "prompt": "Hello! What is the capital of Portugal?",
+    "expectedDomain": "general_chat",
+    "expectedRole": "auxiliary",
+    "expectedComplexityBand": "low",
+    "hasTools": false,
+    "maxTokens": 256
+  },
+  {
+    "id": "chat-02",
+    "prompt": "Hi, quick question: who is credited with inventing the World Wide Web?",
+    "expectedDomain": "general_chat",
+    "expectedRole": "auxiliary",
+    "expectedComplexityBand": "low",
+    "hasTools": false,
+    "maxTokens": 256
+  },
+  {
+    "id": "chat-03",
+    "prompt": "Thanks for the help earlier! Tell me a light programmer joke about coffee.",
+    "expectedDomain": "general_chat",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "chat-04",
+    "prompt": "Quick question: what is the difference between Celsius and Fahrenheit weather forecasts?",
+    "expectedDomain": "general_chat",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "low",
+    "hasTools": false
+  },
+  {
+    "id": "chat-05",
+    "prompt": "Hi! Help me brainstorm five fun team retreat icebreaker ideas and quick question prompts.",
+    "expectedDomain": "general_chat",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  },
+  {
+    "id": "chat-06",
+    "prompt": "Thank you! Let us brainstorm a casual weekend travel itinerary with good weather stops and trivia.",
+    "expectedDomain": "general_chat",
+    "expectedRole": "specialist",
+    "expectedComplexityBand": "medium",
+    "hasTools": false
+  }
+]

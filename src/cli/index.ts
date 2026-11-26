@@ -1,10 +1,14 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import bundledDomains from "../../data/domains.json";
 import bundledSnapshot from "../../data/snapshot.json";
+import pkg from "../../package.json";
 import { buildCandidatePool } from "../core/catalog.js";
 import { createS1Gate } from "../core/engine.js";
 import { scoreAndSelectModel } from "../core/scorer.js";
+import { formatEvalReport, runPublicEval, type EvalReportFormat } from "../replay/eval.js";
 import {
   loadReplaySessionsFromSignalsFile,
   runCounterfactualReplay,
@@ -21,7 +25,7 @@ import type {
   SystemOneSignals,
 } from "../types.js";
 
-const VERSION = "0.1.0";
+export const VERSION: string = pkg.version;
 
 const VALID_PROFILES = new Set<BudgetProfile>(["frugal", "balanced", "quality"]);
 const VALID_ROLES = new Set<ExecutionRole>([
@@ -43,15 +47,25 @@ const VALID_HARNESSES = new Set<HarnessId>([
   "cursor",
   "generic",
 ]);
-const BOOLEAN_FLAGS = new Set(["local-only", "json", "no-tools", "help", "version", "h", "v"]);
+const BOOLEAN_FLAGS = new Set([
+  "local-only",
+  "json",
+  "markdown",
+  "demo",
+  "no-tools",
+  "help",
+  "version",
+  "h",
+  "v",
+]);
 
-interface ParsedArgs {
+export interface ParsedArgs {
   command: string | null;
   flags: Record<string, string | boolean>;
   positionals: string[];
 }
 
-function parseArgv(argv: readonly string[]): ParsedArgs {
+export function parseArgv(argv: readonly string[]): ParsedArgs {
   const flags: Record<string, string | boolean> = {};
   const positionals: string[] = [];
 
@@ -151,7 +165,18 @@ function parsePort(raw: string | undefined, fallback: number): number {
   return n;
 }
 
-function loadAvailableModelsFromFile(filePath: string): string[] {
+function resolveBundledDataPath(filename: string): string {
+  const candidates = [
+    fileURLToPath(new URL(`../../data/${filename}`, import.meta.url)),
+    fileURLToPath(new URL(`../data/${filename}`, import.meta.url)),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return candidates[0];
+}
+
+export function loadAvailableModelsFromFile(filePath: string): string[] {
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
   if (Array.isArray(raw)) {
     return raw.filter((x): x is string => typeof x === "string" && x.trim().length > 0);
@@ -190,8 +215,8 @@ function defaultSnapshotModelIds(snapshot: BenchmarkSnapshot): string[] {
     .map(m => m.id);
 }
 
-function printHelp(): void {
-  const text = `s1gate v${VERSION} — System-1 Cognitive Model Routing Engine
+function formatHelpText(): string {
+  return `s1gate v${VERSION} — System-1 Cognitive Model Routing Engine
 
 Usage:
   s1gate <command> [options]
@@ -199,6 +224,7 @@ Usage:
 Commands:
   serve     Start the zero-fork HTTP routing bridge (/v1/systemone, /v1/route, /health)
   replay    Run offline counterfactual cost & model-mix replay on saved System-1 signals
+  eval      Run the public labelled routing evaluation suite (local-only or remote System-1)
   inspect   Inspect Pareto benchmark scoring & top candidates for a domain
 
 Serve Options:
@@ -211,12 +237,23 @@ Serve Options:
   --local-only               Disable outbound System-1 calls and use local heuristic classifier
 
 Replay Options:
-  --signals <path>           Path to saved System-1 signals JSON file (required)
-  --ocx-models <path>        Path to proxy models.json (defaults to bundled llm-stats.com catalog)
+  --signals <path>           Path to saved System-1 signals JSON file (required unless --demo)
+  --demo                     Replay the bundled 16-session synthetic demo dataset
+  --models-file <path>       Path to candidate models JSON (alias: --ocx-models; defaults to bundled catalog)
   --claude-dir <path>        Path to ~/.claude/projects for real turn-level token logs
   --backend <key>            Signal backend: clef27b | tev1_4b | tev1_08b (default: clef27b)
   --flagship <model>         Flagship baseline model ID (default: claude-opus-5-5)
   --json                     Output machine-readable JSON report
+
+Eval Options:
+  --local-only               Evaluate local heuristic classifier (default if no --systemone-url is set)
+  --dataset <path>           Path to custom labelled eval dataset JSON (defaults to bundled 66-prompt suite)
+  --systemone-url <url>      Remote System-1 endpoint URL (env: S1GATE_SYSTEMONE_URL)
+  --systemone-model <id>     Remote System-1 model ID (env: S1GATE_SYSTEMONE_MODEL, default: jev-latest)
+  --api-key <key>            API key (env: S1GATE_API_KEY | TYPESAFE_API_KEY | JEV_API_KEY | OLLAMA_API_KEY)
+  --profile <name>           Budget profile: frugal | balanced | quality (default: balanced)
+  --json                     Output machine-readable JSON report
+  --markdown                 Output GitHub-flavored Markdown report
 
 Inspect Options:
   --domain <id>              Domain ID (required; e.g. software_engineering, terminal_devops)
@@ -232,7 +269,6 @@ General Options:
   -h, --help                 Show this help message
   -v, --version              Show version
 `;
-  process.stdout.write(text);
 }
 
 function formatUsd(amount: number): string {
@@ -250,7 +286,7 @@ function formatTopMix(mix: Record<string, number>, limit = 5): string {
   return entries.map(([model, count]) => `${model} x${count}`).join(", ");
 }
 
-function formatReplayTable(
+export function formatReplayTable(
   report: ReplayReport,
   backend: string,
   modelCount: number,
@@ -330,7 +366,10 @@ function redactUrlForLog(rawUrl: string): string {
   }
 }
 
-async function runServe(flags: Record<string, string | boolean>): Promise<void> {
+async function runServe(
+  flags: Record<string, string | boolean>,
+  writeOut: (chunk: string) => void,
+): Promise<void> {
   const port = parsePort(getStringFlag(flags, "port") ?? process.env.S1GATE_PORT, 8787);
   const host = getStringFlag(flags, "host") ?? process.env.S1GATE_HOST ?? "127.0.0.1";
   const profile = parseProfile(
@@ -379,7 +418,7 @@ async function runServe(flags: Record<string, string | boolean>): Promise<void> 
       ? `${systemOneModel} @ ${redactUrlForLog(systemOneUrl)}`
       : "heuristic-fallback (no --systemone-url configured)";
 
-  process.stdout.write(
+  writeOut(
     [
       `s1gate v${VERSION} listening on ${bound.url}`,
       `  Profile   : ${profile}`,
@@ -405,10 +444,15 @@ async function runServe(flags: Record<string, string | boolean>): Promise<void> 
   });
 }
 
-function runReplay(flags: Record<string, string | boolean>): void {
-  const signalsPath = getStringFlag(flags, "signals");
+function runReplay(
+  flags: Record<string, string | boolean>,
+  writeOut: (chunk: string) => void,
+): void {
+  const useDemo = getBoolFlag(flags, "demo");
+  const explicitSignalsPath = getStringFlag(flags, "signals");
+  const signalsPath = explicitSignalsPath ?? (useDemo ? resolveBundledDataPath("demo-signals.json") : undefined);
   if (!signalsPath) {
-    throw new Error("Missing required flag: --signals <path>");
+    throw new Error("Missing required flag: --signals <path> (or pass --demo)");
   }
 
   const rawBackend = (getStringFlag(flags, "backend") ?? "clef27b") as
@@ -420,13 +464,14 @@ function runReplay(flags: Record<string, string | boolean>): void {
   }
 
   const snapshot = bundledSnapshot as unknown as BenchmarkSnapshot;
-  const ocxModelsPath = getStringFlag(flags, "ocx-models");
+  const modelsFilePath =
+    getStringFlag(flags, "models-file") ?? getStringFlag(flags, "ocx-models");
   const claudeDir = getStringFlag(flags, "claude-dir");
   const flagshipModel = getStringFlag(flags, "flagship");
   const asJson = getBoolFlag(flags, "json");
 
-  const availableModels = ocxModelsPath
-    ? loadAvailableModelsFromFile(ocxModelsPath)
+  const availableModels = modelsFilePath
+    ? loadAvailableModelsFromFile(modelsFilePath)
     : defaultSnapshotModelIds(snapshot);
 
   const sessions = loadReplaySessionsFromSignalsFile(signalsPath, rawBackend, claudeDir);
@@ -438,14 +483,65 @@ function runReplay(flags: Record<string, string | boolean>): void {
   });
 
   if (asJson) {
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    writeOut(`${JSON.stringify(report, null, 2)}\n`);
     return;
   }
 
-  process.stdout.write(formatReplayTable(report, rawBackend, availableModels.length));
+  writeOut(formatReplayTable(report, rawBackend, availableModels.length));
 }
 
-function runInspect(flags: Record<string, string | boolean>): void {
+async function runEval(
+  flags: Record<string, string | boolean>,
+  writeOut: (chunk: string) => void,
+): Promise<void> {
+  const datasetPath = getStringFlag(flags, "dataset");
+  const profile = parseProfile(
+    getStringFlag(flags, "profile") ?? process.env.S1GATE_PROFILE,
+    "balanced",
+  );
+  const explicitLocalOnly = getBoolFlag(flags, "local-only");
+  const systemOneUrl =
+    getStringFlag(flags, "systemone-url") ?? process.env.S1GATE_SYSTEMONE_URL;
+  const systemOneModel =
+    getStringFlag(flags, "systemone-model") ??
+    process.env.S1GATE_SYSTEMONE_MODEL ??
+    "jev-latest";
+  const apiKey =
+    getStringFlag(flags, "api-key") ??
+    process.env.S1GATE_API_KEY ??
+    process.env.TYPESAFE_API_KEY ??
+    process.env.JEV_API_KEY ??
+    process.env.OLLAMA_API_KEY;
+
+  const localOnly = explicitLocalOnly || !systemOneUrl;
+  const format: EvalReportFormat = getBoolFlag(flags, "json")
+    ? "json"
+    : getBoolFlag(flags, "markdown")
+      ? "markdown"
+      : "table";
+
+  const report = await runPublicEval({
+    ...(datasetPath ? { datasetPath } : {}),
+    localOnly,
+    profile,
+    ...(!localOnly && systemOneUrl
+      ? {
+          systemOne: {
+            endpointUrl: systemOneUrl,
+            model: systemOneModel,
+            ...(apiKey ? { apiKey } : {}),
+          },
+        }
+      : {}),
+  });
+
+  writeOut(formatEvalReport(report, format));
+}
+
+function runInspect(
+  flags: Record<string, string | boolean>,
+  writeOut: (chunk: string) => void,
+): void {
   const domainId = getStringFlag(flags, "domain");
   if (!domainId) {
     throw new Error("Missing required flag: --domain <id>");
@@ -502,7 +598,7 @@ function runInspect(flags: Record<string, string | boolean>): void {
   });
 
   if (asJson) {
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    writeOut(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
 
@@ -529,39 +625,59 @@ function runInspect(flags: Record<string, string | boolean>): void {
   }
   lines.push("");
   lines.push("Benchmark data attribution: llm-stats.com (ZeroEval)");
-  process.stdout.write(`${lines.join("\n")}\n`);
+  writeOut(`${lines.join("\n")}\n`);
 }
 
-async function main(): Promise<void> {
-  const parsed = parseArgv(process.argv.slice(2));
+export async function runCli(
+  argv: readonly string[],
+  writeOut: (chunk: string) => void = (chunk) => {
+    process.stdout.write(chunk);
+  },
+): Promise<void> {
+  const parsed = parseArgv(argv);
 
   if (parsed.flags.version && !parsed.command) {
-    process.stdout.write(`s1gate ${VERSION}\n`);
+    writeOut(`s1gate ${VERSION}\n`);
     return;
   }
 
   if (parsed.flags.help || !parsed.command || parsed.command === "help") {
-    printHelp();
+    writeOut(formatHelpText());
     return;
   }
 
   switch (parsed.command) {
     case "serve":
-      await runServe(parsed.flags);
+      await runServe(parsed.flags, writeOut);
       return;
     case "replay":
-      runReplay(parsed.flags);
+      runReplay(parsed.flags, writeOut);
+      return;
+    case "eval":
+      await runEval(parsed.flags, writeOut);
       return;
     case "inspect":
-      runInspect(parsed.flags);
+      runInspect(parsed.flags, writeOut);
       return;
     default:
       throw new Error(`Unknown command '${parsed.command}'. Run 's1gate --help' for usage.`);
   }
 }
 
-void main().catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`Error: ${message}\n`);
-  process.exit(1);
-});
+function isDirectCliInvocation(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return resolve(entry) === fileURLToPath(import.meta.url);
+  }
+}
+
+if (isDirectCliInvocation()) {
+  void runCli(process.argv.slice(2)).catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`Error: ${message}\n`);
+    process.exit(1);
+  });
+}

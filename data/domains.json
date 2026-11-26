@@ -85,7 +85,7 @@
   },
   {
     "id": "healthcare",
-    "description": "Clinical and medical domain logic, hospital EMR/SIMRS workflows, clinical coding, patient safety",
+    "description": "Clinical and medical domain logic, hospital EMR/EHR workflows, clinical coding, patient safety",
     "benchmarkChain": [
       "healthbench_professional",
       "healthbench",

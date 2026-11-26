@@ -590,6 +590,7 @@ export function createHttpBridge(
             domain: decision.signals?.domain ?? null,
             role: decision.role,
             cachePinned: decision.cachePinned,
+            ...(decision.recommendedEffort ? { recommendedEffort: decision.recommendedEffort } : {}),
           },
         },
         responseHeaders,

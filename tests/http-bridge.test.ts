@@ -118,6 +118,8 @@ describe("HTTP Bridge Server", () => {
       }
       expect(res.headers.get("x-router-model")).toBe(decision.selectedModel);
       expect(res.headers.get("x-router-benchmark-source")).toBe("llm-stats.com");
+      expect(decision.recommendedEffort).toBe("medium");
+      expect(res.headers.get("x-router-effort")).toBe("medium");
     });
 
     it("merges incoming HTTP headers with payload.headers where payload.headers takes precedence", async () => {
@@ -322,6 +324,7 @@ describe("HTTP Bridge Server", () => {
           domain: string | null;
           role: string;
           cachePinned: boolean;
+          recommendedEffort?: string;
         };
       };
 
@@ -331,6 +334,8 @@ describe("HTTP Bridge Server", () => {
       expect(data.s1gate.domain).toBe("terminal_devops");
       expect(typeof data.s1gate.role).toBe("string");
       expect(data.s1gate.cachePinned).toBe(true);
+      expect(data.s1gate.recommendedEffort).toBe("medium");
+      expect(res.headers.get("x-router-effort")).toBe("medium");
 
       const routeAns = data.answers.route;
       expect(routeAns).toBeDefined();
@@ -1117,6 +1122,7 @@ describe("HTTP Bridge Server", () => {
         expect(res.status).toBe(200);
         const data = (await res.json()) as {
           answers: { route: { choice: string; probabilities: Record<string, number> } };
+          s1gate: { action: string; recommendedEffort?: string };
         };
         expect(data.answers.route.choice).toBe("anthropic/claude-sonnet-5-5");
         expect(Object.keys(data.answers.route.probabilities)).toEqual([
@@ -1124,6 +1130,9 @@ describe("HTTP Bridge Server", () => {
           "anthropic/claude-haiku-5-5",
         ]);
         expect(res.headers.get("x-router-model")).toBe("anthropic/claude-sonnet-5-5");
+        expect(data.s1gate.action).toBe("passthrough");
+        expect(data.s1gate.recommendedEffort).toBeUndefined();
+        expect(res.headers.get("x-router-effort")).toBeNull();
       } finally {
         await triggerBridge.close();
       }

@@ -1,0 +1,404 @@
+{
+  "sessions": [
+    {
+      "id": "demo-se-01",
+      "project": "orders-api",
+      "isSubagent": false,
+      "turns": 14,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "software_engineering",
+        "probs": { "software_engineering": 0.88, "terminal_devops": 0.07, "research_architecture": 0.05 },
+        "conf": 0.88,
+        "comp": 0.44,
+        "noul": 0.18,
+        "latencyMs": 390,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "software_engineering",
+        "probs": { "software_engineering": 0.84, "terminal_devops": 0.11, "research_architecture": 0.05 },
+        "conf": 0.84,
+        "comp": 0.48,
+        "noul": 0.21,
+        "latencyMs": 145,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-se-02",
+      "project": "orders-api",
+      "isSubagent": true,
+      "turns": 7,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "software_engineering",
+        "probs": { "software_engineering": 0.91, "writing_docs": 0.05, "general_chat": 0.04 },
+        "conf": 0.91,
+        "comp": 0.36,
+        "noul": 0.12,
+        "latencyMs": 340,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "software_engineering",
+        "probs": { "software_engineering": 0.87, "writing_docs": 0.08, "general_chat": 0.05 },
+        "conf": 0.87,
+        "comp": 0.39,
+        "noul": 0.15,
+        "latencyMs": 120,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-se-03",
+      "project": "billing-core",
+      "isSubagent": false,
+      "turns": 24,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "software_engineering",
+        "probs": { "software_engineering": 0.76, "research_architecture": 0.18, "finance_data": 0.06 },
+        "conf": 0.76,
+        "comp": 0.84,
+        "noul": 0.79,
+        "latencyMs": 470,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "software_engineering",
+        "probs": { "software_engineering": 0.72, "research_architecture": 0.21, "finance_data": 0.07 },
+        "conf": 0.72,
+        "comp": 0.81,
+        "noul": 0.75,
+        "latencyMs": 175,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-devops-01",
+      "project": "deploy-infra",
+      "isSubagent": false,
+      "turns": 12,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "terminal_devops",
+        "probs": { "terminal_devops": 0.92, "software_engineering": 0.06, "agentic_tools": 0.02 },
+        "conf": 0.92,
+        "comp": 0.49,
+        "noul": 0.22,
+        "latencyMs": 380,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "terminal_devops",
+        "probs": { "terminal_devops": 0.89, "software_engineering": 0.08, "agentic_tools": 0.03 },
+        "conf": 0.89,
+        "comp": 0.52,
+        "noul": 0.24,
+        "latencyMs": 135,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-devops-02",
+      "project": "deploy-infra",
+      "isSubagent": true,
+      "turns": 6,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "terminal_devops",
+        "probs": { "terminal_devops": 0.94, "software_engineering": 0.04, "general_chat": 0.02 },
+        "conf": 0.94,
+        "comp": 0.31,
+        "noul": 0.11,
+        "latencyMs": 330,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "terminal_devops",
+        "probs": { "terminal_devops": 0.9, "software_engineering": 0.07, "general_chat": 0.03 },
+        "conf": 0.9,
+        "comp": 0.34,
+        "noul": 0.14,
+        "latencyMs": 118,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-fe-01",
+      "project": "admin-portal",
+      "isSubagent": false,
+      "turns": 10,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "frontend_web",
+        "probs": { "frontend_web": 0.93, "software_engineering": 0.05, "writing_docs": 0.02 },
+        "conf": 0.93,
+        "comp": 0.35,
+        "noul": 0.14,
+        "latencyMs": 360,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "frontend_web",
+        "probs": { "frontend_web": 0.88, "software_engineering": 0.09, "writing_docs": 0.03 },
+        "conf": 0.88,
+        "comp": 0.38,
+        "noul": 0.18,
+        "latencyMs": 130,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-fe-02",
+      "project": "design-system",
+      "isSubagent": false,
+      "turns": 17,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "frontend_web",
+        "probs": { "frontend_web": 0.86, "software_engineering": 0.1, "research_architecture": 0.04 },
+        "conf": 0.86,
+        "comp": 0.57,
+        "noul": 0.27,
+        "latencyMs": 410,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "frontend_web",
+        "probs": { "frontend_web": 0.82, "software_engineering": 0.13, "research_architecture": 0.05 },
+        "conf": 0.82,
+        "comp": 0.6,
+        "noul": 0.31,
+        "latencyMs": 152,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-agent-01",
+      "project": "mcp-gateway",
+      "isSubagent": false,
+      "turns": 15,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "agentic_tools",
+        "probs": { "agentic_tools": 0.85, "software_engineering": 0.11, "terminal_devops": 0.04 },
+        "conf": 0.85,
+        "comp": 0.58,
+        "noul": 0.29,
+        "latencyMs": 425,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "agentic_tools",
+        "probs": { "agentic_tools": 0.8, "software_engineering": 0.15, "terminal_devops": 0.05 },
+        "conf": 0.8,
+        "comp": 0.61,
+        "noul": 0.33,
+        "latencyMs": 158,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-agent-02",
+      "project": "workflow-runner",
+      "isSubagent": false,
+      "turns": 28,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "agentic_tools",
+        "probs": { "agentic_tools": 0.81, "research_architecture": 0.14, "software_engineering": 0.05 },
+        "conf": 0.81,
+        "comp": 0.82,
+        "noul": 0.84,
+        "latencyMs": 485,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "agentic_tools",
+        "probs": { "agentic_tools": 0.77, "research_architecture": 0.17, "software_engineering": 0.06 },
+        "conf": 0.77,
+        "comp": 0.8,
+        "noul": 0.79,
+        "latencyMs": 182,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-arch-01",
+      "project": "platform-rfc",
+      "isSubagent": false,
+      "turns": 21,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "research_architecture",
+        "probs": { "research_architecture": 0.9, "software_engineering": 0.07, "terminal_devops": 0.03 },
+        "conf": 0.9,
+        "comp": 0.92,
+        "noul": 0.91,
+        "latencyMs": 510,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "research_architecture",
+        "probs": { "research_architecture": 0.86, "software_engineering": 0.1, "terminal_devops": 0.04 },
+        "conf": 0.86,
+        "comp": 0.89,
+        "noul": 0.87,
+        "latencyMs": 190,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-math-01",
+      "project": "pricing-sim",
+      "isSubagent": false,
+      "turns": 13,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "math_science",
+        "probs": { "math_science": 0.91, "finance_data": 0.06, "software_engineering": 0.03 },
+        "conf": 0.91,
+        "comp": 0.86,
+        "noul": 0.74,
+        "latencyMs": 460,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "math_science",
+        "probs": { "math_science": 0.88, "finance_data": 0.08, "software_engineering": 0.04 },
+        "conf": 0.88,
+        "comp": 0.83,
+        "noul": 0.71,
+        "latencyMs": 168,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-health-01",
+      "project": "fhir-adapter",
+      "isSubagent": false,
+      "turns": 11,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "healthcare",
+        "probs": { "healthcare": 0.89, "software_engineering": 0.08, "legal": 0.03 },
+        "conf": 0.89,
+        "comp": 0.62,
+        "noul": 0.24,
+        "latencyMs": 430,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "healthcare",
+        "probs": { "healthcare": 0.85, "software_engineering": 0.11, "legal": 0.04 },
+        "conf": 0.85,
+        "comp": 0.64,
+        "noul": 0.28,
+        "latencyMs": 156,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-fin-01",
+      "project": "ledger-sync",
+      "isSubagent": false,
+      "turns": 9,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "finance_data",
+        "probs": { "finance_data": 0.9, "software_engineering": 0.07, "math_science": 0.03 },
+        "conf": 0.9,
+        "comp": 0.54,
+        "noul": 0.21,
+        "latencyMs": 405,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "finance_data",
+        "probs": { "finance_data": 0.87, "software_engineering": 0.09, "math_science": 0.04 },
+        "conf": 0.87,
+        "comp": 0.56,
+        "noul": 0.23,
+        "latencyMs": 144,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-legal-01",
+      "project": "policy-review",
+      "isSubagent": false,
+      "turns": 8,
+      "hasTools": false,
+      "clef27b": {
+        "domain": "legal",
+        "probs": { "legal": 0.93, "writing_docs": 0.05, "general_chat": 0.02 },
+        "conf": 0.93,
+        "comp": 0.64,
+        "noul": 0.26,
+        "latencyMs": 415,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "legal",
+        "probs": { "legal": 0.9, "writing_docs": 0.07, "general_chat": 0.03 },
+        "conf": 0.9,
+        "comp": 0.66,
+        "noul": 0.29,
+        "latencyMs": 149,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-docs-01",
+      "project": "sdk-docs",
+      "isSubagent": false,
+      "turns": 5,
+      "hasTools": true,
+      "clef27b": {
+        "domain": "writing_docs",
+        "probs": { "writing_docs": 0.94, "software_engineering": 0.04, "general_chat": 0.02 },
+        "conf": 0.94,
+        "comp": 0.24,
+        "noul": 0.08,
+        "latencyMs": 325,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "writing_docs",
+        "probs": { "writing_docs": 0.91, "software_engineering": 0.06, "general_chat": 0.03 },
+        "conf": 0.91,
+        "comp": 0.27,
+        "noul": 0.1,
+        "latencyMs": 115,
+        "ok": true
+      }
+    },
+    {
+      "id": "demo-chat-01",
+      "project": "sandbox",
+      "isSubagent": false,
+      "turns": 3,
+      "hasTools": false,
+      "clef27b": {
+        "domain": "general_chat",
+        "probs": { "general_chat": 0.96, "writing_docs": 0.03, "software_engineering": 0.01 },
+        "conf": 0.96,
+        "comp": 0.15,
+        "noul": 0.05,
+        "latencyMs": 295,
+        "ok": true
+      },
+      "tev1_4b": {
+        "domain": "general_chat",
+        "probs": { "general_chat": 0.94, "writing_docs": 0.04, "software_engineering": 0.02 },
+        "conf": 0.94,
+        "comp": 0.18,
+        "noul": 0.07,
+        "latencyMs": 102,
+        "ok": true
+      }
+    }
+  ]
+}
