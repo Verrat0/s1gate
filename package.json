@@ -1,6 +1,6 @@
 {
   "name": "@albifhrzq/s1gate",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "System-1 cognitive model routing engine combining Jev/tev1/clef task classification with deterministic llm-stats.com benchmark scoring and KV cache protection.",
   "license": "MIT",
   "author": {
