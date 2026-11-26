@@ -1,5 +1,9 @@
 # s1gate
 
+[![npm version](https://img.shields.io/npm/v/%40albifhrzq%2Fs1gate)](https://www.npmjs.com/package/@albifhrzq/s1gate)
+[![CI](https://github.com/albifhrzq/s1gate/actions/workflows/ci.yml/badge.svg)](https://github.com/albifhrzq/s1gate/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
 **System-1 Cognitive Model Routing Engine** for agentic coding proxies — combining fast System-1 task classification (`Jev` / `clef:27b` / `tev1:4b` / `tev1:0.8b`) with deterministic [`llm-stats.com`](https://llm-stats.com) benchmark scoring and KV-cache session protection.
 
 ---
