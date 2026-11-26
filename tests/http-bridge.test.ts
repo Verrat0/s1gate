@@ -224,6 +224,54 @@ describe("HTTP Bridge Server", () => {
         expect(err.error.length).toBeGreaterThan(0);
       }
     });
+
+    it("validates estimatedContextTokens on /v1/route (accepts non-negative numbers, rejects negative/non-number with 400)", async () => {
+      const okRes = await fetch(`${baseUrl}/v1/route`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          body: {
+            model: "s1gate",
+            messages: [{ role: "user", content: "Inspect long session logs" }],
+          },
+          availableModels: ["ollama-cloud/gpt-oss:120b", "anthropic/claude-sonnet-5-5"],
+          estimatedContextTokens: 150_000,
+        }),
+      });
+      expect(okRes.status).toBe(200);
+      const okDecision = (await okRes.json()) as S1GateDecision;
+      expect(okDecision.selectedModel).toBe("anthropic/claude-sonnet-5-5");
+      expect(okRes.headers.get("x-router-context-window")).toBe("1000000");
+
+      const zeroRes = await fetch(`${baseUrl}/v1/route`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          body: {
+            model: "s1gate",
+            messages: [{ role: "user", content: "Short check" }],
+          },
+          availableModels: ["anthropic/claude-sonnet-5-5"],
+          estimatedContextTokens: 0,
+        }),
+      });
+      expect(zeroRes.status).toBe(200);
+
+      for (const badVal of [-1, -150_000, "NaN", "150000", null, true, {}, []]) {
+        const res = await fetch(`${baseUrl}/v1/route`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            body: { messages: [{ role: "user", content: "hi" }] },
+            availableModels: TEST_MODELS,
+            estimatedContextTokens: badVal,
+          }),
+        });
+        expect(res.status).toBe(400);
+        const err = (await res.json()) as { error: string };
+        expect(err.error).toContain("estimatedContextTokens");
+      }
+    });
   });
 
   describe("POST /v1/systemone (ocx / 9router drop-in bridge)", () => {
@@ -402,6 +450,282 @@ describe("HTTP Bridge Server", () => {
         expect(res.status).toBe(400);
         const err = (await res.json()) as { error: string };
         expect(typeof err.error).toBe("string");
+      }
+    });
+
+    it("excludes 128K gpt-oss:120b on /v1/systemone when X-S1Gate-Context-Tokens: 150000 is sent and returns X-Router-Context-Window", async () => {
+      const frugalEngine = createS1Gate({
+        defaultProfile: "frugal",
+        classifier: createStubClassifier({
+          domain: "healthcare",
+          domainProbabilities: { healthcare: 1.0 },
+          complexity: 0.3,
+        }),
+      });
+      const ctxBridge = createHttpBridge(frugalEngine, { port: 0, host: "127.0.0.1" });
+      const started = await ctxBridge.start();
+      try {
+        const body = JSON.stringify({
+          state: "Continue clinical triage summary",
+          questions: {
+            route: {
+              type: "choice",
+              criteria: {
+                "ollama-cloud/gpt-oss:120b": "Fast low-cost 128K",
+                "anthropic/claude-sonnet-5-5": "Balanced 1M context",
+              },
+            },
+          },
+        });
+
+        // Without context header -> 128K gpt-oss:120b wins
+        const smallRes = await fetch(`${started.url}/v1/systemone`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-session-id": "sys1-ctx-small",
+          },
+          body,
+        });
+        expect(smallRes.status).toBe(200);
+        const smallData = (await smallRes.json()) as {
+          answers: { route: { choice: string } };
+        };
+        expect(smallData.answers.route.choice).toBe("ollama-cloud/gpt-oss:120b");
+        expect(smallRes.headers.get("x-router-context-window")).toBe("131072");
+
+        // With X-S1Gate-Context-Tokens: 150000 -> 128K excluded, 1M model chosen
+        const largeRes = await fetch(`${started.url}/v1/systemone`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-session-id": "sys1-ctx-large",
+            "X-S1Gate-Context-Tokens": "150000",
+          },
+          body,
+        });
+        expect(largeRes.status).toBe(200);
+        const largeData = (await largeRes.json()) as {
+          answers: { route: { choice: string } };
+        };
+        expect(largeData.answers.route.choice).toBe("anthropic/claude-sonnet-5-5");
+        expect(largeRes.headers.get("x-router-context-window")).toBe("1000000");
+      } finally {
+        await ctxBridge.close();
+      }
+    });
+
+    it("parses structured state signals (estimated_tokens, has_image, tool_history) and criteria quota % to steer away from 128K and high-quota models", async () => {
+      const captured: S1GateRequest[] = [];
+      const baseEngine = createS1Gate({
+        defaultProfile: "balanced",
+        classifier: createStubClassifier({
+          domain: "healthcare",
+          domainProbabilities: { healthcare: 1.0 },
+          complexity: 0.5,
+        }),
+      });
+      const spyEngine = {
+        ...baseEngine,
+        async route(req: S1GateRequest): Promise<S1GateDecision> {
+          captured.push(req);
+          return baseEngine.route(req);
+        },
+      };
+      const sigBridge = createHttpBridge(spyEngine, { port: 0, host: "127.0.0.1" });
+      const started = await sigBridge.start();
+      try {
+        const res = await fetch(`${started.url}/v1/systemone`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-session-id": "sys1-structured-signals",
+          },
+          body: JSON.stringify({
+            state: {
+              task: "Analyze radiology screenshot and patch EMR endpoint",
+              previous_assistant: "Checking the uploaded chart and server logs.",
+              step: {
+                type: "tool_step",
+                tool_call: { name: "bash" },
+                last_tool_output_tail: "pytest: 2 failed",
+              },
+              signals: {
+                estimated_tokens: 150_000,
+                has_image: true,
+                tool_history: true,
+              },
+            },
+            questions: {
+              route: {
+                type: "choice",
+                criteria: {
+                  "ollama-cloud/gpt-oss:120b": "Low-cost 128K. Quota low (5% of 5h used).",
+                  "anthropic/claude-sonnet-5-5": "Balanced coding. Quota high (92% of 5h used).",
+                  "openai/gpt-6.2-sol": "General flagship. Quota low (12% of 5h used).",
+                },
+              },
+            },
+          }),
+        });
+
+        expect(res.status).toBe(200);
+        const data = (await res.json()) as {
+          answers: { route: { choice: string } };
+        };
+        // Excludes 128K non-multimodal gpt-oss:120b AND steers away from 92%-quota claude-sonnet-5-5
+        expect(data.answers.route.choice).toBe("openai/gpt-6.2-sol");
+        expect(res.headers.get("x-router-context-window")).toBeTruthy();
+
+        expect(captured).toHaveLength(1);
+        const forwarded = captured[0];
+        expect(forwarded.estimatedContextTokens).toBe(150_000);
+        expect(forwarded.quotaUtilization).toEqual({
+          "ollama-cloud/gpt-oss:120b": 0.05,
+          "anthropic/claude-sonnet-5-5": 0.92,
+          "openai/gpt-6.2-sol": 0.12,
+        });
+        expect(Array.isArray(forwarded.body.tools)).toBe(true);
+        const firstMsg = (forwarded.body.messages as Array<{ content: unknown }>)[0];
+        expect(Array.isArray(firstMsg.content)).toBe(true);
+        const blocks = firstMsg.content as Array<{ type: string; text?: string }>;
+        expect(blocks[0].type).toBe("text");
+        expect(blocks[0].text).toContain("Analyze radiology screenshot");
+        expect(blocks[0].text).toContain("pytest: 2 failed");
+        expect(blocks.some(b => b.type === "image_url")).toBe(true);
+      } finally {
+        await sigBridge.close();
+      }
+    });
+
+    it("sanitizes oversized/newline-injected tool_call.name, falls through state.estimated_tokens: 0 to signals, and takes max multi-window quota %", async () => {
+      const captured: S1GateRequest[] = [];
+      const baseEngine = createS1Gate({
+        defaultProfile: "balanced",
+        classifier: createStubClassifier({
+          domain: "terminal_devops",
+          domainProbabilities: { terminal_devops: 1.0 },
+          complexity: 0.4,
+        }),
+      });
+      const spyEngine = {
+        ...baseEngine,
+        async route(req: S1GateRequest): Promise<S1GateDecision> {
+          captured.push(req);
+          return baseEngine.route(req);
+        },
+      };
+      const sigBridge = createHttpBridge(spyEngine, { port: 0, host: "127.0.0.1" });
+      const started = await sigBridge.start();
+      try {
+        const res = await fetch(`${started.url}/v1/systemone`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            state: {
+              task: "Run diagnostics",
+              estimated_tokens: 0,
+              step: {
+                type: "tool_step",
+                tool_call: { name: `bash\r\nX-Injected: evil !@# ${"z".repeat(120)}` },
+              },
+              signals: {
+                estimated_tokens: 150_000,
+              },
+            },
+            questions: {
+              route: {
+                type: "choice",
+                criteria: {
+                  "anthropic/claude-sonnet-5-5":
+                    "Quota 5h (15% of 5h used). Quota weekly cap (91% of 7d used).",
+                  "openai/gpt-6.2-sol": "Quota (12% of 5h used).",
+                },
+              },
+            },
+          }),
+        });
+
+        expect(res.status).toBe(200);
+        expect(captured).toHaveLength(1);
+        const forwarded = captured[0];
+        expect(forwarded.estimatedContextTokens).toBe(150_000);
+        expect(forwarded.quotaUtilization).toEqual({
+          "anthropic/claude-sonnet-5-5": 0.91,
+          "openai/gpt-6.2-sol": 0.12,
+        });
+        const forwardedTools = forwarded.body.tools as Array<{ function: { name: string } }>;
+        expect(forwardedTools).toHaveLength(1);
+        const sanitizedName = forwardedTools[0].function.name;
+        expect(sanitizedName.length).toBeLessThanOrEqual(64);
+        expect(sanitizedName).toMatch(/^[\w.:-]+$/);
+        expect(sanitizedName.startsWith("bashX-Injected:evil")).toBe(true);
+      } finally {
+        await sigBridge.close();
+      }
+    });
+
+    it("excludes a non-multimodal large-context candidate when signals.has_image is true (isolated)", async () => {
+      const mmEngine = createS1Gate({
+        defaultProfile: "frugal",
+        classifier: createStubClassifier({
+          domain: "healthcare",
+          domainProbabilities: { healthcare: 1.0 },
+          complexity: 0.3,
+        }),
+        modelOverrides: {
+          "ollama-cloud/gpt-oss:120b": {
+            contextWindow: 1_000_000,
+          },
+        },
+      });
+      const mmBridge = createHttpBridge(mmEngine, { port: 0, host: "127.0.0.1" });
+      const started = await mmBridge.start();
+      try {
+        const criteria = {
+          "ollama-cloud/gpt-oss:120b": "Ultra-cheap 1M text-only",
+          "anthropic/claude-sonnet-5-5": "Balanced 1M multimodal",
+        };
+
+        // Baseline without image -> ultra-cheap text-only 1M model wins
+        const textRes = await fetch(`${started.url}/v1/systemone`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-session-id": "sys1-mm-text",
+          },
+          body: JSON.stringify({
+            state: {
+              task: "Summarize patient chart notes",
+              signals: { has_image: false },
+            },
+            questions: { route: { type: "choice", criteria } },
+          }),
+        });
+        expect(textRes.status).toBe(200);
+        const textData = (await textRes.json()) as { answers: { route: { choice: string } } };
+        expect(textData.answers.route.choice).toBe("ollama-cloud/gpt-oss:120b");
+
+        // Isolated signals.has_image: true -> excludes non-multimodal 1M candidate
+        const imgRes = await fetch(`${started.url}/v1/systemone`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-session-id": "sys1-mm-image",
+          },
+          body: JSON.stringify({
+            state: {
+              task: "Summarize patient chart notes",
+              signals: { has_image: true },
+            },
+            questions: { route: { type: "choice", criteria } },
+          }),
+        });
+        expect(imgRes.status).toBe(200);
+        const imgData = (await imgRes.json()) as { answers: { route: { choice: string } } };
+        expect(imgData.answers.route.choice).toBe("anthropic/claude-sonnet-5-5");
+      } finally {
+        await mmBridge.close();
       }
     });
   });
@@ -639,7 +963,27 @@ describe("HTTP Bridge Server", () => {
         });
         expect(r2.status).toBe(200);
 
-        expect(captured).toHaveLength(2);
+        const r3 = await fetch(`${started.url}/v1/route`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-claude-code-session-id": "keep-session-id",
+          },
+          body: JSON.stringify({
+            headers: {
+              Authorization: "Bearer payload-secret",
+              "X-API-Key": "payload-api-key",
+              Cookie: "session=payload-cookie",
+              "Proxy-Authorization": "Basic payload-proxy",
+              "X-Safe-Header": "kept",
+            },
+            body: { messages: [{ role: "user", content: "hello" }] },
+            availableModels: ["anthropic/claude-sonnet-5-5"],
+          }),
+        });
+        expect(r3.status).toBe(200);
+
+        expect(captured).toHaveLength(3);
         for (const req of captured) {
           expect(req.headers.authorization).toBeUndefined();
           expect(req.headers.cookie).toBeUndefined();
@@ -647,6 +991,7 @@ describe("HTTP Bridge Server", () => {
           expect(req.headers["proxy-authorization"]).toBeUndefined();
           expect(req.headers["x-claude-code-session-id"]).toBe("keep-session-id");
         }
+        expect(captured[2].headers["x-safe-header"]).toBe("kept");
       } finally {
         await secBridge.close();
       }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildResponseHeaders, createS1Gate } from "../src/core/engine.js";
+import { buildResponseHeaders, createS1Gate, resolveCallerContextTokens } from "../src/core/engine.js";
 import type { ClassifierAdapter, S1GateRequest, SystemOneSignals } from "../src/types.js";
 
 const ACTIVE_MODELS = [
@@ -586,5 +586,205 @@ describe("S1GateEngine end-to-end orchestration", () => {
     });
     expect(s2.action).toBe("pin_reuse");
     expect(s2.selectedModel).toBe("anthropic/claude-sonnet-5-5");
+  });
+
+  it("excludes 128K gpt-oss:120b when req.estimatedContextTokens = 150_000 and emits X-Router-Context-Window", async () => {
+    const clf = mockClassifier({
+      domain: "healthcare",
+      domainProbabilities: { healthcare: 1.0 },
+      complexity: 0.3,
+      needsFlagshipOrchestrator: 0.1,
+    });
+    const gate = createS1Gate({ defaultProfile: "frugal", classifier: clf });
+    const pool = ["ollama-cloud/gpt-oss:120b", "anthropic/claude-sonnet-5-5"];
+
+    // Baseline with small context: ultra-cheap 128K gpt-oss:120b wins
+    const small = await gate.route({
+      protocol: "openai_chat",
+      headers: { "x-session-id": "sess-ctx-small" },
+      body: {
+        model: "s1gate",
+        messages: [{ role: "user", content: "Summarize clinical triage checklist" }],
+      },
+      availableModels: pool,
+    });
+    expect(small.selectedModel).toBe("ollama-cloud/gpt-oss:120b");
+    expect(small.headers["X-Router-Context-Window"]).toBe("131072");
+
+    // Caller-provided 150K context excludes 128K gpt-oss:120b in favor of 1M model
+    const large = await gate.route({
+      protocol: "openai_chat",
+      headers: { "x-session-id": "sess-ctx-large" },
+      body: {
+        model: "s1gate",
+        messages: [{ role: "user", content: "Continue long clinical review" }],
+      },
+      availableModels: pool,
+      estimatedContextTokens: 150_000,
+    });
+    expect(large.action).toBe("route");
+    expect(large.selectedModel).toBe("anthropic/claude-sonnet-5-5");
+    expect(large.headers["X-Router-Context-Window"]).toBe("1000000");
+  });
+
+  it("triggers 90% headroom sticky-pin invalidation and upgrade via x-s1gate-context-tokens header (>115.2K on 128K pin)", async () => {
+    const clf = mockClassifier({
+      domain: "terminal_devops",
+      domainProbabilities: { terminal_devops: 0.95 },
+      complexity: 0.4,
+      needsFlagshipOrchestrator: 0.1,
+    });
+    const gate = createS1Gate({
+      defaultProfile: "balanced",
+      classifier: clf,
+      modelOverrides: {
+        "google-antigravity/gemini-4-hydrogen": { contextWindow: 128_000 },
+      },
+    });
+    const pool = ["google-antigravity/gemini-4-hydrogen", "anthropic/claude-sonnet-5-5"];
+
+    // Turn 1: 50K tokens fits 128K pin
+    const t1 = await gate.route({
+      protocol: "anthropic_messages",
+      harness: "claude_code",
+      headers: {
+        "x-claude-code-session-id": "sess-hdr-90",
+        "X-S1Gate-Context-Tokens": "50000",
+      },
+      body: {
+        model: "s1gate",
+        tools: [{ name: "bash" }],
+        messages: [{ role: "user", content: "Inspect docker compose config" }],
+      },
+      availableModels: pool,
+      nowMs: 1_000_000,
+    });
+    expect(t1.action).toBe("route");
+    expect(t1.selectedModel).toBe("google-antigravity/gemini-4-hydrogen");
+    expect(t1.headers["X-Router-Context-Window"]).toBe("128000");
+    expect(clf.calls).toBe(1);
+
+    // Turn 2: exactly 90% (115,200 tokens) keeps sticky pin
+    const t2 = await gate.route({
+      protocol: "anthropic_messages",
+      harness: "claude_code",
+      headers: {
+        "x-claude-code-session-id": "sess-hdr-90",
+        "x-s1gate-context-tokens": " 115200 ",
+      },
+      body: {
+        model: "s1gate",
+        tools: [{ name: "bash" }],
+        messages: [{ role: "user", content: "Inspect nginx logs too" }],
+      },
+      availableModels: pool,
+      nowMs: 1_001_000,
+    });
+    expect(t2.action).toBe("pin_reuse");
+    expect(t2.selectedModel).toBe("google-antigravity/gemini-4-hydrogen");
+    expect(t2.headers["X-Router-Context-Window"]).toBe("128000");
+    expect(clf.calls).toBe(1);
+
+    // Turn 3: 116,000 tokens (> 115.2K headroom, still < 128K raw) invalidates pin & upgrades to 1M model!
+    const t3 = await gate.route({
+      protocol: "anthropic_messages",
+      harness: "claude_code",
+      headers: {
+        "x-claude-code-session-id": "sess-hdr-90",
+        "X-S1Gate-Context-Tokens": "116000",
+      },
+      body: {
+        model: "s1gate",
+        tools: [{ name: "bash" }],
+        messages: [{ role: "user", content: "Inspect full cluster manifests" }],
+      },
+      availableModels: pool,
+      nowMs: 1_002_000,
+    });
+    expect(t3.action).toBe("route");
+    expect(t3.selectedModel).toBe("anthropic/claude-sonnet-5-5");
+    expect(t3.headers["X-Router-Context-Window"]).toBe("1000000");
+    expect(clf.calls).toBe(2);
+  });
+
+  it("safely ignores malformed, negative, NaN, or Infinity x-s1gate-context-tokens headers and clamps extremes", async () => {
+    const baseReq: S1GateRequest = {
+      protocol: "openai_chat",
+      headers: {},
+      body: { model: "s1gate", messages: [{ role: "user", content: "Check logs" }] },
+      availableModels: ["ollama-cloud/gpt-oss:120b", "anthropic/claude-sonnet-5-5"],
+    };
+
+    for (const bad of [
+      "",
+      "   ",
+      "abc",
+      "150000px",
+      "-1",
+      "-50000",
+      "NaN",
+      "Infinity",
+      "-Infinity",
+      "0x100000",
+      "0b101",
+      "0o777",
+      "1e5",
+      "+50000",
+      "123.45",
+    ]) {
+      expect(
+        resolveCallerContextTokens({
+          ...baseReq,
+          headers: { "X-S1Gate-Context-Tokens": bad },
+        }),
+      ).toBe(0);
+    }
+
+    expect(
+      resolveCallerContextTokens({
+        ...baseReq,
+        estimatedContextTokens: 0,
+        headers: { "x-s1gate-context-tokens": "150000" },
+      }),
+    ).toBe(150_000);
+
+    expect(
+      resolveCallerContextTokens({
+        ...baseReq,
+        headers: { "x-s1gate-context-tokens": "999999999" },
+      }),
+    ).toBe(10_000_000);
+
+    expect(
+      resolveCallerContextTokens({
+        ...baseReq,
+        estimatedContextTokens: 50_000_000,
+        headers: { "x-s1gate-context-tokens": "100" },
+      }),
+    ).toBe(10_000_000);
+
+    expect(
+      resolveCallerContextTokens({
+        ...baseReq,
+        estimatedContextTokens: -10,
+        headers: { "x-s1gate-context-tokens": "42000" },
+      }),
+    ).toBe(42_000);
+
+    // End-to-end route with malformed/negative header falls back cleanly without breaking 128K selection
+    const gate = createS1Gate({
+      defaultProfile: "frugal",
+      classifier: mockClassifier({
+        domain: "healthcare",
+        domainProbabilities: { healthcare: 1.0 },
+        complexity: 0.3,
+      }),
+    });
+    const res = await gate.route({
+      ...baseReq,
+      headers: { "x-s1gate-context-tokens": "-999999" },
+    });
+    expect(res.selectedModel).toBe("ollama-cloud/gpt-oss:120b");
+    expect(res.headers["X-Router-Context-Window"]).toBe("131072");
   });
 });

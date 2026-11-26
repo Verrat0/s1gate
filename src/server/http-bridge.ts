@@ -16,6 +16,7 @@ const RANK_PROBABILITY_DECAY = 0.35;
 const SERVER_HEADERS_TIMEOUT_MS = 10_000;
 const SERVER_REQUEST_TIMEOUT_MS = 15_000;
 const SERVER_KEEP_ALIVE_TIMEOUT_MS = 5_000;
+const CRITERIA_QUOTA_RE = /Quota(?:\s+[^\s(]+)*\s+\((\d+(?:\.\d+)?)%\s+of\b/gi;
 
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 const STRIPPED_INCOMING_HEADERS = new Set([
@@ -116,7 +117,7 @@ function mergeHeaders(
   const merged: Record<string, string | undefined> = { ...incoming };
   for (const [key, value] of Object.entries(payloadHeaders)) {
     const lowerKey = key.toLowerCase();
-    if (isUnsafeKey(lowerKey)) {
+    if (isUnsafeKey(lowerKey) || STRIPPED_INCOMING_HEADERS.has(lowerKey)) {
       continue;
     }
     if (typeof value === "string" || value === undefined) {
@@ -280,6 +281,14 @@ function parseRouteRequest(
   if (payload.nowMs !== undefined && (typeof payload.nowMs !== "number" || !Number.isFinite(payload.nowMs))) {
     throw new HttpError(400, "Field 'nowMs' must be a finite number");
   }
+  if (
+    payload.estimatedContextTokens !== undefined &&
+    (typeof payload.estimatedContextTokens !== "number" ||
+      !Number.isFinite(payload.estimatedContextTokens) ||
+      payload.estimatedContextTokens < 0)
+  ) {
+    throw new HttpError(400, "Field 'estimatedContextTokens' must be a non-negative finite number");
+  }
 
   const quotaUtilization = parseQuotaUtilization(payload.quotaUtilization);
   const headers = mergeHeaders(incomingHeaders, payload.headers);
@@ -291,6 +300,9 @@ function parseRouteRequest(
     availableModels: [...payload.availableModels],
     ...(typeof payload.path === "string" ? { path: payload.path } : {}),
     ...(quotaUtilization ? { quotaUtilization } : {}),
+    ...(typeof payload.estimatedContextTokens === "number"
+      ? { estimatedContextTokens: payload.estimatedContextTokens }
+      : {}),
     ...(profile ? { profile } : {}),
     ...(roleOverride ? { roleOverride } : {}),
     ...(harness ? { harness } : {}),
@@ -302,6 +314,64 @@ interface ParsedSystemOneRequest {
   questionKey: string;
   candidateIds: string[];
   s1Req: S1GateRequest;
+}
+
+function extractStateEstimatedTokens(state: Record<string, unknown>): number | undefined {
+  const signals = isPlainObject(state.signals) ? state.signals : undefined;
+  const step = isPlainObject(state.step) ? state.step : undefined;
+  const candidates = [
+    state.estimated_tokens,
+    state.context_tokens,
+    state.input_tokens,
+    signals?.estimated_tokens,
+    step?.estimated_tokens,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function buildStructuredStateText(state: Record<string, unknown>): string {
+  const parts: string[] = [];
+  if (typeof state.task === "string" && state.task.trim().length > 0) {
+    parts.push(state.task.trim());
+  }
+  if (typeof state.previous_assistant === "string" && state.previous_assistant.trim().length > 0) {
+    parts.push(state.previous_assistant.trim());
+  }
+  const step = isPlainObject(state.step) ? state.step : undefined;
+  if (
+    step &&
+    typeof step.last_tool_output_tail === "string" &&
+    step.last_tool_output_tail.trim().length > 0
+  ) {
+    parts.push(step.last_tool_output_tail.trim());
+  }
+  return parts.length > 0 ? parts.join("\n\n") : JSON.stringify(state);
+}
+
+function extractCriteriaQuotaUtilization(
+  criteria: Record<string, unknown>,
+): Record<string, number> | undefined {
+  const result: Record<string, number> = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(criteria)) {
+    if (isUnsafeKey(key) || typeof value !== "string") continue;
+    let maxPct = -1;
+    for (const match of value.matchAll(CRITERIA_QUOTA_RE)) {
+      const pct = Number(match[1]);
+      if (Number.isFinite(pct) && pct > maxPct) {
+        maxPct = pct;
+      }
+    }
+    if (maxPct < 0) continue;
+    result[key] = Math.min(0.99, Math.max(0, maxPct / 100));
+    count += 1;
+  }
+  return count > 0 ? result : undefined;
 }
 
 function parseSystemOneRequest(
@@ -318,6 +388,7 @@ function parseSystemOneRequest(
 
   let questionKey: string | null = null;
   let candidateIds: string[] = [];
+  let questionCriteria: Record<string, unknown> = {};
 
   for (const [key, rawQuestion] of Object.entries(payload.questions)) {
     if (isUnsafeKey(key)) continue;
@@ -331,6 +402,7 @@ function parseSystemOneRequest(
       }
       questionKey = key;
       candidateIds = keys;
+      questionCriteria = rawQuestion.criteria;
       break;
     }
   }
@@ -339,15 +411,54 @@ function parseSystemOneRequest(
     throw new HttpError(400, "Field 'questions' must include at least one 'choice' question");
   }
 
-  const stateText = typeof payload.state === "string" ? payload.state : JSON.stringify(payload.state);
+  let estimatedContextTokens: number | undefined;
+  let messageContent: unknown;
+  let tools: unknown[] | undefined;
+
+  if (isPlainObject(payload.state)) {
+    const state = payload.state;
+    estimatedContextTokens = extractStateEstimatedTokens(state);
+    const stateText = buildStructuredStateText(state);
+    const signals = isPlainObject(state.signals) ? state.signals : undefined;
+    const step = isPlainObject(state.step) ? state.step : undefined;
+    const hasImage = signals?.has_image === true;
+    const hasToolsSignal =
+      signals?.tool_history === true ||
+      (step !== undefined && (step.type === "tool_step" || Boolean(step.tool_call)));
+
+    messageContent = hasImage
+      ? [
+          { type: "text", text: stateText },
+          { type: "image_url", image_url: { url: "data:image/png;base64," } },
+        ]
+      : stateText;
+
+    if (hasToolsSignal) {
+      const toolCall = step && isPlainObject(step.tool_call) ? step.tool_call : undefined;
+      const rawToolName =
+        typeof toolCall?.name === "string"
+          ? toolCall.name.trim().replace(/[^\w.:-]/g, "").slice(0, 64)
+          : "";
+      const toolName = rawToolName.length > 0 ? rawToolName : "tool";
+      tools = [{ type: "function", function: { name: toolName } }];
+    }
+  } else {
+    messageContent = typeof payload.state === "string" ? payload.state : JSON.stringify(payload.state);
+  }
+
+  const quotaUtilization = extractCriteriaQuotaUtilization(questionCriteria);
+
   const s1Req: S1GateRequest = {
     protocol: "openai_chat",
     headers: { ...incomingHeaders },
     body: {
       model: "s1gate",
-      messages: [{ role: "user", content: stateText }],
+      messages: [{ role: "user", content: messageContent }],
+      ...(tools ? { tools } : {}),
     },
     availableModels: candidateIds,
+    ...(estimatedContextTokens !== undefined ? { estimatedContextTokens } : {}),
+    ...(quotaUtilization ? { quotaUtilization } : {}),
     ...(defaultProfile ? { profile: defaultProfile } : {}),
   };
 

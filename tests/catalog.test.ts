@@ -20,9 +20,14 @@ describe("catalog: canonical model ID resolution & candidate pool", () => {
     expect(normalizeProxyModelId("gpt-6.2-sol--fast")).toBe("gpt-6.2-sol");
     expect(normalizeProxyModelId("anthropic/claude-fable-5-2")).toBe("claude-fable-5-2");
     expect(normalizeProxyModelId("openai/gpt-oss:120b:free")).toBe("gpt-oss-120b");
+    expect(normalizeProxyModelId("ollama-cloud/deepseek-v4-pro:0813:none")).toBe("deepseek-v4-pro");
+    expect(normalizeProxyModelId("ollama-cloud/glm-5.3:high")).toBe("glm-5.3");
+    expect(normalizeProxyModelId("ollama-cloud/gemma4:31b:none")).toBe("gemma4-31b");
   });
 
   it("resolves real OCX and OpenRouter model IDs against the bundled llm-stats snapshot", () => {
+    expect(resolveCanonicalModelId("ollama-cloud/deepseek-v4-pro:0813:none", snapshot)).toBe("deepseek-v4-pro-0813");
+    expect(resolveCanonicalModelId("ollama-cloud/gemma4:31b:none", snapshot)).toBe("gemma-4-31b-it");
     expect(resolveCanonicalModelId("anthropic/claude-fable-5-2", snapshot)).toBe("claude-fable-5-2");
     expect(resolveCanonicalModelId("anthropic/claude-haiku-4-5", snapshot)).toBe("claude-haiku-4-5-20251001");
     expect(resolveCanonicalModelId("google-antigravity/gemini-4-neon", snapshot)).toBe("gemini-4-neon");

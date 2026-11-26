@@ -91,6 +91,8 @@ export interface S1GateRequest {
   availableModels: string[];
   /** Optional real-time quota utilization in [0, 1) keyed by proxyId or provider prefix */
   quotaUtilization?: Record<string, number>;
+  /** Optional caller-provided session token count when proxy trims body.messages or already computed tokens */
+  estimatedContextTokens?: number;
   /** Explicit profile override (e.g. from 9Router combo UI) */
   profile?: BudgetProfile;
   /** Explicit role override */

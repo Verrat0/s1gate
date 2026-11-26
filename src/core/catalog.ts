@@ -31,9 +31,10 @@ export function normalizeProxyModelId(rawId: string): string {
   // Strip provider prefix (anthropic/, openai/, google-antigravity/, ollama-cloud/, cc/, cx/, glm/, etc.)
   const slashIdx = id.indexOf("/");
   if (slashIdx > 0) id = id.slice(slashIdx + 1);
-  // Strip OpenRouter or OCX variant suffixes: :free, :exacto, :0813, --fast, -tiered-high, -high/-medium/-low
+  // Strip OpenRouter or OCX variant/JEV-effort suffixes: :none/:high, :free, :exacto, :0813, --fast, -tiered-high
   id = id.replace(/--(fast|high|medium|low|xhigh|max|ultra)$/, "");
   id = id.replace(/-(tiered-)?(high|medium|low|xhigh)$/, "");
+  id = id.replace(/:(none|low|medium|high|xhigh|max|ultra)$/, "");
   id = id.replace(/:(free|extended|nitro|floor|exacto|thinking|\d{4})$/, "");
   // Convert remaining colon (e.g. gpt-oss:120b, deepseek-v4-pro:0813) to hyphen
   id = id.replace(/:/g, "-");
@@ -62,6 +63,19 @@ export function resolveCanonicalModelId(
 
   const exact = lowerMap.get(rawId.trim().toLowerCase());
   if (exact) return exact;
+
+  // Prefer exact date-tagged match (e.g. deepseek-v4-pro:0813:none -> deepseek-v4-pro-0813) before stripping :\d{4}
+  const effortStripped = rawId
+    .trim()
+    .toLowerCase()
+    .replace(/^ocx-claude-[a-z0-9._-]+--/, "")
+    .replace(/^[^/]+\//, "")
+    .replace(/--(fast|high|medium|low|xhigh|max|ultra)$/, "")
+    .replace(/-(tiered-)?(high|medium|low|xhigh)$/, "")
+    .replace(/:(none|low|medium|high|xhigh|max|ultra)$/, "")
+    .replace(/:/g, "-");
+  const exactTagged = lowerMap.get(effortStripped);
+  if (exactTagged) return exactTagged;
 
   const norm = normalizeProxyModelId(rawId);
   const direct = lowerMap.get(norm);

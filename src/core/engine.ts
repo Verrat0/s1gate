@@ -3,6 +3,7 @@ import bundledSnapshot from "../../data/snapshot.json";
 import type {
   BenchmarkSnapshot,
   BudgetProfile,
+  CandidateModel,
   ClassifierAdapter,
   DomainDefinition,
   ExecutionRole,
@@ -46,12 +47,44 @@ export interface S1GateEngine {
 }
 
 const ESCALATION_QUALITY_TOLERANCE = 0.03;
+const MAX_CALLER_CONTEXT_TOKENS = 10_000_000;
+const MIN_REQUIRED_CONTEXT_TOKENS = 32_000;
+
+export function resolveCallerContextTokens(req: S1GateRequest): number {
+  const fieldTokens =
+    typeof req.estimatedContextTokens === "number" &&
+    Number.isFinite(req.estimatedContextTokens) &&
+    req.estimatedContextTokens > 0
+      ? req.estimatedContextTokens
+      : 0;
+
+  let headerTokens = 0;
+  const headers = req.headers;
+  if (headers && typeof headers === "object") {
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.toLowerCase() !== "x-s1gate-context-tokens") continue;
+      if (typeof value !== "string") continue;
+      const raw = value.trim();
+      if (!/^\d+$/.test(raw)) break;
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        headerTokens = parsed;
+      }
+      break;
+    }
+  }
+
+  return Math.min(MAX_CALLER_CONTEXT_TOKENS, Math.max(fieldTokens, headerTokens));
+}
 
 function sanitizeHeaderValue(val: string): string {
   return val.replace(/[^\x20-\x7e]/g, "").slice(0, 256);
 }
 
-export function buildResponseHeaders(decision: Omit<S1GateDecision, "headers">): Record<string, string> {
+export function buildResponseHeaders(
+  decision: Omit<S1GateDecision, "headers">,
+  contextWindow?: number,
+): Record<string, string> {
   const raw: Record<string, string> = {
     "X-Router-Engine": "s1gate",
     "X-Router-Model": decision.selectedModel,
@@ -62,6 +95,9 @@ export function buildResponseHeaders(decision: Omit<S1GateDecision, "headers">):
     "X-Router-Latency-Ms": String(Math.round(decision.latencyMs.total * 100) / 100),
     "X-Router-Benchmark-Source": "llm-stats.com",
   };
+  if (typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0) {
+    raw["X-Router-Context-Window"] = String(Math.floor(contextWindow));
+  }
   if (decision.signals?.domain) {
     raw["X-Router-Domain"] = decision.signals.domain;
     raw["X-Router-Complexity"] = decision.signals.complexity.toFixed(2);
@@ -79,10 +115,13 @@ export function buildResponseHeaders(decision: Omit<S1GateDecision, "headers">):
   return headers;
 }
 
-function finalizeDecision(base: Omit<S1GateDecision, "headers">): S1GateDecision {
+function finalizeDecision(
+  base: Omit<S1GateDecision, "headers">,
+  contextWindow?: number,
+): S1GateDecision {
   return {
     ...base,
-    headers: buildResponseHeaders(base),
+    headers: buildResponseHeaders(base, contextWindow),
   };
 }
 
@@ -200,6 +239,19 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
     fallbacks: 0,
   };
 
+  function resolveContextWindow(
+    modelId: string,
+    candidates?: readonly CandidateModel[],
+  ): number | undefined {
+    if (!modelId) return undefined;
+    if (candidates) {
+      const matched = candidates.find(c => c.proxyId === modelId);
+      return matched && matched.contextWindow > 0 ? matched.contextWindow : undefined;
+    }
+    const single = buildCandidatePool([modelId], snapshot, config.modelOverrides)[0];
+    return single && single.contextWindow > 0 ? single.contextWindow : undefined;
+  }
+
   async function route(req: S1GateRequest): Promise<S1GateDecision> {
     const tStart = performance.now();
     stats.totalRequests += 1;
@@ -216,6 +268,14 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
       triggerModels: config.triggerModels,
       defaultProfile,
     });
+    const effectiveContextTokens = Math.max(
+      verdict.estimatedInputTokens,
+      resolveCallerContextTokens(req),
+    );
+    const requiredContextTokens = Math.max(
+      MIN_REQUIRED_CONTEXT_TOKENS,
+      Math.ceil((effectiveContextTokens * 10) / 9),
+    );
     const profile: BudgetProfile = req.profile ?? verdict.profileOverride ?? defaultProfile;
     const isSubagent = verdict.isSubagentHeader || verdict.role === "subagent";
     const sessionKey = resolveSessionKey(req, isSubagent);
@@ -224,16 +284,23 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
     if (verdict.kind === "passthrough") {
       stats.passthroughs += 1;
       const fastMs = performance.now() - tFastStart;
-      return finalizeDecision({
-        selectedModel: rawBodyModel || safeDefaultModel,
-        rankedFallbacks: availableModels.filter(m => m !== rawBodyModel),
-        action: "passthrough",
-        role: verdict.role,
-        profile,
-        sessionKey: null,
-        cachePinned: false,
-        latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
-      });
+      const selectedModel = rawBodyModel || safeDefaultModel;
+      const ctxWin = availableModels.includes(selectedModel)
+        ? resolveContextWindow(selectedModel)
+        : undefined;
+      return finalizeDecision(
+        {
+          selectedModel,
+          rankedFallbacks: availableModels.filter(m => m !== rawBodyModel),
+          action: "passthrough",
+          role: verdict.role,
+          profile,
+          sessionKey: null,
+          cachePinned: false,
+          latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
+        },
+        ctxWin,
+      );
     }
 
     // 2. Compaction boundary -> unlock pin & route compaction request to fast/long-context summarizer
@@ -242,16 +309,23 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
       sessionStore.delete(sessionKey);
       const compactModel = pickAuxiliaryModel(availableModels, config.auxiliaryModelHints);
       const fastMs = performance.now() - tFastStart;
-      return finalizeDecision({
-        selectedModel: compactModel || safeDefaultModel,
-        rankedFallbacks: availableModels.filter(m => m !== compactModel),
-        action: "compact",
-        role: "auxiliary",
-        profile,
-        sessionKey,
-        cachePinned: false,
-        latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
-      });
+      const selectedModel = compactModel || safeDefaultModel;
+      const ctxWin = availableModels.includes(selectedModel)
+        ? resolveContextWindow(selectedModel)
+        : undefined;
+      return finalizeDecision(
+        {
+          selectedModel,
+          rankedFallbacks: availableModels.filter(m => m !== compactModel),
+          action: "compact",
+          role: "auxiliary",
+          profile,
+          sessionKey,
+          cachePinned: false,
+          latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
+        },
+        ctxWin,
+      );
     }
 
     // 3. Auxiliary call -> 0ms bypass without calling System-1 or disturbing parent session pin
@@ -259,16 +333,23 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
       stats.auxiliaryBypasses += 1;
       const auxModel = pickAuxiliaryModel(availableModels, config.auxiliaryModelHints);
       const fastMs = performance.now() - tFastStart;
-      return finalizeDecision({
-        selectedModel: auxModel || safeDefaultModel,
-        rankedFallbacks: availableModels.filter(m => m !== auxModel),
-        action: "auxiliary",
-        role: "auxiliary",
-        profile,
-        sessionKey: null,
-        cachePinned: false,
-        latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
-      });
+      const selectedModel = auxModel || safeDefaultModel;
+      const ctxWin = availableModels.includes(selectedModel)
+        ? resolveContextWindow(selectedModel)
+        : undefined;
+      return finalizeDecision(
+        {
+          selectedModel,
+          rankedFallbacks: availableModels.filter(m => m !== auxModel),
+          action: "auxiliary",
+          role: "auxiliary",
+          profile,
+          sessionKey: null,
+          cachePinned: false,
+          latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
+        },
+        ctxWin,
+      );
     }
 
     // Empty model pool failsafe
@@ -317,7 +398,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
       (!pinCandidate ||
         (verdict.requiresMultimodal && !pinCandidate.multimodal) ||
         (verdict.hasTools && !pinCandidate.supportsTools) ||
-        pinCandidate.contextWindow < verdict.estimatedInputTokens ||
+        pinCandidate.contextWindow * 9 < effectiveContextTokens * 10 ||
         pinCandidate.harnessCompat[harness] === "unsupported" ||
         (explicitProfileOverride !== undefined && explicitProfileOverride !== rawExistingPin.profile) ||
         (effectiveRoleOverride !== undefined && effectiveRoleOverride !== rawExistingPin.role));
@@ -334,7 +415,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
 
     // 4. Sticky Session Pin Check + Stuck-Loop Ratchet
     if (existingPin && pinModelStillAvailable) {
-      if (sessionStore.didCompact(existingPin, verdict.estimatedInputTokens)) {
+      if (sessionStore.didCompact(existingPin, effectiveContextTokens)) {
         isCompactionBoundary = true;
         stats.compactions += 1;
         sessionStore.delete(sessionKey);
@@ -348,22 +429,25 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
           const updatedPin: SessionPin = {
             ...existingPin,
             turnCount: existingPin.turnCount + 1,
-            lastEstimatedTokens: verdict.estimatedInputTokens,
+            lastEstimatedTokens: effectiveContextTokens,
             lastUsedAtMs: nowMs,
           };
           sessionStore.set(updatedPin);
           const fastMs = performance.now() - tFastStart;
-          return finalizeDecision({
-            selectedModel: existingPin.model,
-            rankedFallbacks: availableModels.filter(m => m !== existingPin.model),
-            action: "pin_reuse",
-            role: existingPin.role,
-            profile: existingPin.profile,
-            sessionKey,
-            cachePinned: true,
-            ...(stuckLoop ? { stuckLoop } : {}),
-            latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
-          });
+          return finalizeDecision(
+            {
+              selectedModel: existingPin.model,
+              rankedFallbacks: availableModels.filter(m => m !== existingPin.model),
+              action: "pin_reuse",
+              role: existingPin.role,
+              profile: existingPin.profile,
+              sessionKey,
+              cachePinned: true,
+              ...(stuckLoop ? { stuckLoop } : {}),
+              latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: 0 },
+            },
+            resolveContextWindow(existingPin.model, candidates),
+          );
         }
 
         // Hard 0ms deterministic escalation (skip System-1!)
@@ -391,7 +475,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
               role: "orchestrator",
               hasTools: verdict.hasTools,
               requiresMultimodal: verdict.requiresMultimodal,
-              requiredContextTokens: Math.max(32_000, verdict.estimatedInputTokens),
+              requiredContextTokens,
               harness,
               quotaUtilization: req.quotaUtilization,
             },
@@ -410,30 +494,33 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
             turnCount: existingPin.turnCount + 1,
             escalatedAtTurn: existingPin.turnCount + 1,
             escalationCount: existingPin.escalationCount + 1,
-            lastEstimatedTokens: verdict.estimatedInputTokens,
+            lastEstimatedTokens: effectiveContextTokens,
             lastUsedAtMs: nowMs,
           });
 
-          return finalizeDecision({
-            selectedModel: nextModel,
-            rankedFallbacks: scoring.rankedCandidates.filter(c => c.proxyId !== nextModel).map(c => c.proxyId),
-            action: "escalate",
-            role: "orchestrator",
-            profile: "quality",
-            sessionKey,
-            cachePinned: true,
-            stuckLoop,
-            scoring: {
-              qualityScore: scoring.selected.qualityScore,
-              qMax: scoring.qMax,
-              qualityFloor: scoring.qualityFloor,
-              effectiveCost: scoring.selected.effectiveCost,
-              benchmarkRefs: scoring.selected.benchmarkRefs,
-              baselineModel: scoring.baselineModel,
-              estimatedSavingsPct: scoring.estimatedSavingsPct,
+          return finalizeDecision(
+            {
+              selectedModel: nextModel,
+              rankedFallbacks: scoring.rankedCandidates.filter(c => c.proxyId !== nextModel).map(c => c.proxyId),
+              action: "escalate",
+              role: "orchestrator",
+              profile: "quality",
+              sessionKey,
+              cachePinned: true,
+              stuckLoop,
+              scoring: {
+                qualityScore: scoring.selected.qualityScore,
+                qMax: scoring.qMax,
+                qualityFloor: scoring.qualityFloor,
+                effectiveCost: scoring.selected.effectiveCost,
+                benchmarkRefs: scoring.selected.benchmarkRefs,
+                baselineModel: scoring.baselineModel,
+                estimatedSavingsPct: scoring.estimatedSavingsPct,
+              },
+              latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: scoreMs },
             },
-            latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: 0, scoring: scoreMs },
-          });
+            resolveContextWindow(nextModel, candidates),
+          );
         }
       }
     }
@@ -477,22 +564,25 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
       sessionStore.set({
         ...existingPin,
         turnCount: existingPin.turnCount + 1,
-        lastEstimatedTokens: verdict.estimatedInputTokens,
+        lastEstimatedTokens: effectiveContextTokens,
         lastUsedAtMs: nowMs,
       });
-      return finalizeDecision({
-        selectedModel: existingPin.model,
-        rankedFallbacks: availableModels.filter(m => m !== existingPin.model),
-        action: "pin_reuse",
-        role: existingPin.role,
-        profile: existingPin.profile,
-        sessionKey,
-        cachePinned: true,
-        signals,
-        stuckLoop,
-        ...(signals.fallbackReason ? { fallbackReason: signals.fallbackReason } : {}),
-        latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: clfMs, scoring: 0 },
-      });
+      return finalizeDecision(
+        {
+          selectedModel: existingPin.model,
+          rankedFallbacks: availableModels.filter(m => m !== existingPin.model),
+          action: "pin_reuse",
+          role: existingPin.role,
+          profile: existingPin.profile,
+          sessionKey,
+          cachePinned: true,
+          signals,
+          stuckLoop,
+          ...(signals.fallbackReason ? { fallbackReason: signals.fallbackReason } : {}),
+          latencyMs: { total: performance.now() - tStart, fastPath: fastMs, classifier: clfMs, scoring: 0 },
+        },
+        resolveContextWindow(existingPin.model, candidates),
+      );
     }
 
     // ---------- STAGE 2: Deterministic Scoring & Selection (<0.1ms) ----------
@@ -518,11 +608,11 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
       role: resolvedRole,
       hasTools: verdict.hasTools,
       requiresMultimodal: verdict.requiresMultimodal,
-      requiredContextTokens: Math.max(32_000, verdict.estimatedInputTokens),
+      requiredContextTokens,
       harness,
       quotaUtilization: req.quotaUtilization,
       ...(existingPin && pinModelStillAvailable && !isCompactionBoundary && !isEscalating
-        ? { switchingFromModel: existingPin.model, currentContextTokens: verdict.estimatedInputTokens }
+        ? { switchingFromModel: existingPin.model, currentContextTokens: effectiveContextTokens }
         : {}),
     };
 
@@ -544,7 +634,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
         const switchCheck = shouldAllowMidSessionSwitch({
           currentModel: curCandidate,
           nextModel: nextCandidate,
-          currentContextTokens: verdict.estimatedInputTokens,
+          currentContextTokens: effectiveContextTokens,
           hasThinkingSignature: verdict.hasThinkingSignature,
           isCompactionBoundary,
           isHardEscalation: false,
@@ -571,7 +661,7 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
       profile: finalProfile,
       domain: signals.domain,
       complexity: signals.complexity,
-      lastEstimatedTokens: verdict.estimatedInputTokens,
+      lastEstimatedTokens: effectiveContextTokens,
       turnCount: nextTurnCount,
       escalatedAtTurn: action === "escalate" ? nextTurnCount : (existingPin?.escalatedAtTurn ?? null),
       escalationCount: action === "escalate" ? (existingPin?.escalationCount ?? 0) + 1 : (existingPin?.escalationCount ?? 0),
@@ -579,33 +669,36 @@ export function createS1Gate(config: S1GateConfig = {}): S1GateEngine {
       lastUsedAtMs: nowMs,
     });
 
-    return finalizeDecision({
-      selectedModel,
-      rankedFallbacks: scoring.rankedCandidates.filter(c => c.proxyId !== selectedModel).map(c => c.proxyId),
-      action,
-      role: finalRole,
-      profile: finalProfile,
-      sessionKey,
-      cachePinned: true,
-      signals,
-      ...(stuckLoop ? { stuckLoop } : {}),
-      scoring: {
-        qualityScore: scoring.selected.qualityScore,
-        qMax: scoring.qMax,
-        qualityFloor: scoring.qualityFloor,
-        effectiveCost: scoring.selected.effectiveCost,
-        benchmarkRefs: scoring.selected.benchmarkRefs,
-        baselineModel: scoring.baselineModel,
-        estimatedSavingsPct: scoring.estimatedSavingsPct,
+    return finalizeDecision(
+      {
+        selectedModel,
+        rankedFallbacks: scoring.rankedCandidates.filter(c => c.proxyId !== selectedModel).map(c => c.proxyId),
+        action,
+        role: finalRole,
+        profile: finalProfile,
+        sessionKey,
+        cachePinned: true,
+        signals,
+        ...(stuckLoop ? { stuckLoop } : {}),
+        scoring: {
+          qualityScore: scoring.selected.qualityScore,
+          qMax: scoring.qMax,
+          qualityFloor: scoring.qualityFloor,
+          effectiveCost: scoring.selected.effectiveCost,
+          benchmarkRefs: scoring.selected.benchmarkRefs,
+          baselineModel: scoring.baselineModel,
+          estimatedSavingsPct: scoring.estimatedSavingsPct,
+        },
+        ...(signals.fallbackReason ? { fallbackReason: signals.fallbackReason } : {}),
+        latencyMs: {
+          total: performance.now() - tStart,
+          fastPath: fastMs,
+          classifier: clfMs,
+          scoring: scoreMs,
+        },
       },
-      ...(signals.fallbackReason ? { fallbackReason: signals.fallbackReason } : {}),
-      latencyMs: {
-        total: performance.now() - tStart,
-        fastPath: fastMs,
-        classifier: clfMs,
-        scoring: scoreMs,
-      },
-    });
+      resolveContextWindow(selectedModel, candidates),
+    );
   }
 
   return {

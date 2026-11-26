@@ -60,11 +60,11 @@ flowchart TD
 Install `s1gate` in your TypeScript / Node 20+ / Bun proxy (e.g. **OpenCodex (`ocx`)**, **9Router**, or a custom gateway):
 
 ```bash
-npm install s1gate
+npm install @albifhrzq/s1gate
 ```
 
 ```ts
-import { createS1Gate } from "s1gate";
+import { createS1Gate } from "@albifhrzq/s1gate";
 
 const router = createS1Gate({
   defaultProfile: "balanced", // "frugal" | "balanced" | "quality"
@@ -104,7 +104,7 @@ Users can also override profile or role inline via virtual model hints such as `
 Run `s1gate` as a standalone local sidecar without modifying your proxy's language runtime:
 
 ```bash
-npx s1gate serve \
+npx @albifhrzq/s1gate serve \
   --port 8787 \
   --profile balanced \
   --systemone-url https://ollama.com/v1/systemone \
@@ -114,16 +114,21 @@ npx s1gate serve \
 Or run completely offline with zero outbound classifier traffic:
 
 ```bash
-npx s1gate serve --port 8787 --local-only
+npx @albifhrzq/s1gate serve --port 8787 --local-only
 ```
 
 ### Endpoints
 
 | Method & Path | Intended Consumer | Description |
 | --- | --- | --- |
-| `POST /v1/systemone` | OpenCodex (`ocx`), 9Router, System-1 clients | Drop-in System-1 choice endpoint; maps `questions.*.criteria` keys to candidate models and returns ranked `choice` + `probabilities` + `X-Router-*` headers. |
-| `POST /v1/route` | Go / Python / Rust / custom proxies | Full `s1gate` routing API accepting `{ protocol, headers, body, availableModels, profile?, harness?, quotaUtilization? }` and returning the full `S1GateDecision`. |
+| `POST /v1/systemone` | OpenCodex (`ocx`), 9Router, System-1 clients | Drop-in System-1 choice endpoint; maps `questions.*.criteria` keys to candidate models, parses structured `state` signals (`estimated_tokens`, `has_image`, `tool_history`) and advisory quota percentages from `criteria`, and returns ranked `choice` + `probabilities` + `X-Router-*` headers. |
+| `POST /v1/route` | Go / Python / Rust / custom proxies | Full `s1gate` routing API accepting `{ protocol, headers, body, availableModels, estimatedContextTokens?, profile?, harness?, quotaUtilization? }` and returning the full `S1GateDecision`. |
 | `GET /health` | Healthchecks & monitoring | Returns engine status, bundled `llm-stats.com` model count, domain count, and live routing stats. |
+
+#### Context Window & Signal Headers
+
+- **Request header `X-S1Gate-Context-Tokens`** (or `estimatedContextTokens` on `POST /v1/route` / `state.signals.estimated_tokens` on `POST /v1/systemone`): caller-provided session token count used when the proxy trims `body.messages` or already counted context tokens. Enforces 90% context-window headroom on both sticky-pin invalidation and Stage 2 model selection.
+- **Response header `X-Router-Context-Window`**: emitted whenever the selected model resolves to a candidate with a positive context window (e.g. `1000000`), alongside `X-Router-Model`, `X-Router-Action`, `X-Router-Role`, and `X-Router-Benchmark-Source`.
 
 ### Environment Variables
 
@@ -160,7 +165,7 @@ All external System-1 calls only receive a **redacted routing envelope** (fenced
 Replay recorded sessions against your proxy's live model catalog before enabling live routing:
 
 ```bash
-npx s1gate replay \
+npx @albifhrzq/s1gate replay \
   --signals ./benchmarks/systemone-signals-257-sessions.json \
   --ocx-models ./ocx/models.json \
   --claude-dir ~/.claude/projects \
@@ -169,10 +174,22 @@ npx s1gate replay \
 
 Output compares **Always Flagship**, **Actual (logged)**, **Naive Per-Turn (cache bust)**, and **`s1gate` Quality / Balanced / Frugal** with cost deltas and top model mixes. Add `--json` for machine-readable CI output.
 
+### Sample Counterfactual Replay Results
+
+Evaluated offline across **257 real coding-agent sessions** (**15,991 turns**, **92.3% prompt-cache read share**, 73-model catalog, `clef:27b` System-1 signals, `llm-stats.com` pricing & benchmarks):
+
+| Strategy | Total Cost | vs Always Flagship | vs Actual Logged |
+| --- | ---: | ---: | ---: |
+| Always Flagship | `$2,282.88` | baseline | `+33.6%` |
+| Actual (logged) | `$1,709.27` | `-25.1%` | baseline |
+| Naive Per-Turn (cache bust) | `$1,602.43` | `-29.8%` | `-6.3%` |
+| **`s1gate` Balanced** | **`$1,038.26`** | **`-54.5%`** | **`-39.3%`** |
+| **`s1gate` Frugal** | **`$370.09`** | **`-83.8%`** | **`-78.3%`** |
+
 Inspect how `s1gate` ranks candidates for any domain and complexity:
 
 ```bash
-npx s1gate inspect \
+npx @albifhrzq/s1gate inspect \
   --domain software_engineering \
   --complexity 0.55 \
   --profile balanced \
